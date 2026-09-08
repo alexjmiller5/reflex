@@ -19,7 +19,6 @@ TIMESTAMP_RULES = {
     R.PROJECTS: [("Status", "Completed Date", {"Completed"}, {"To Do", "In progress"})],
     R.BOOKS: [("Status", "Date Read", {"Finished"}, {"Not Started", "In Progress"})],
     R.MOVIES: [("Status", "Date Watched", {"Finished"}, {"Not Started", "In Progress"})],
-    R.ARTICLES: [("Status", "Read Date", {"Done"}, {"Not started", "In progress"})],
     R.PODCASTS: [("Status", "Date Listened To", {"Finished"}, {"Not Started", "In Progress"})],
     # Synapse's Outcome -> Date Reviewed rule is handled in the SYNAPSE-specific
     # block in evaluate() instead of here: on page.created it must judge the
@@ -69,7 +68,6 @@ _SLUGS = {
     R.PROJECTS: "projects",
     R.BOOKS: "books",
     R.MOVIES: "movies",
-    R.ARTICLES: "articles",
     R.SYNAPSE: "synapse",
     R.PODCASTS: "podcasts",
 }

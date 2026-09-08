@@ -178,35 +178,6 @@ def test_movies_not_started_clears_date_watched():
     assert v[0].rule == "movies-date-watched-clear"
 
 
-# --- Articles ---
-
-
-def test_articles_done_sets_read_date():
-    p = page(
-        R.ARTICLES,
-        {
-            "Status": status("Done"),
-            "Read Date": dateval(None),
-            "Name": {"title": [{"plain_text": "A"}]},
-        },
-    )
-    v = evaluate(R.ARTICLES, p, NOW)
-    assert v[0].rule == "articles-read-date-set"
-
-
-def test_articles_not_started_clears_read_date():
-    p = page(
-        R.ARTICLES,
-        {
-            "Status": status("Not started"),
-            "Read Date": dateval("2026-08-01"),
-            "Name": {"title": [{"plain_text": "A"}]},
-        },
-    )
-    v = evaluate(R.ARTICLES, p, NOW)
-    assert v[0].rule == "articles-read-date-clear"
-
-
 # --- Projects ---
 
 

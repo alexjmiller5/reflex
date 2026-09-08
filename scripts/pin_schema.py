@@ -16,10 +16,7 @@ DBS = {  # name -> data_source_id (copy the Global Constraints block)
     "Calendar": "24c03953-a8af-8036-8b1b-000bb8d77b03",
     "Synapse Executions": "2b103953-a8af-8062-971a-000b0e200122",
     "Books": "331618e2-6245-4819-983f-6f7e9b06401d",
-    "YouTube Videos": "cb9e2038-139a-4f53-82a2-095ea19df27b",
-    "TV Shows": "507e4205-3476-4d19-9e50-584c9ee96c49",
     "Movies": "4eb907d5-1be3-41e3-be31-9afd33510a1f",
-    "Articles": "1c703953-a8af-8062-a379-000b8e250413",
     "Podcast Episodes": "cebfc967-c37d-4dbf-a3d0-795b8e971ab7",
     "Gifts": "0c39fffe-c8c2-43a5-af03-0a378c682c1c",
 }

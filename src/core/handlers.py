@@ -28,7 +28,6 @@ EVENT_DBS = frozenset(
         R.SYNAPSE,
         R.BOOKS,
         R.MOVIES,
-        R.ARTICLES,
         R.PODCASTS,
     }
 )
