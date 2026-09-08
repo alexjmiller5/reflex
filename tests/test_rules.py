@@ -137,64 +137,6 @@ def test_compliant_page_yields_nothing():
     assert evaluate(R.BOOKS, p, NOW) == []
 
 
-# --- YouTube ---
-
-
-def test_youtube_watched_sets_date_watched():
-    p = page(
-        R.YOUTUBE,
-        {
-            "Status": status("Watched"),
-            "Date Watched": dateval(None),
-            "Title": {"title": [{"plain_text": "Y"}]},
-        },
-    )
-    v = evaluate(R.YOUTUBE, p, NOW)
-    assert v[0].rule == "youtube-date-watched-set"
-
-
-def test_youtube_to_watch_clears_date_watched():
-    p = page(
-        R.YOUTUBE,
-        {
-            "Status": status("To Watch"),
-            "Date Watched": dateval("2026-08-01"),
-            "Title": {"title": [{"plain_text": "Y"}]},
-        },
-    )
-    v = evaluate(R.YOUTUBE, p, NOW)
-    assert v[0].rule == "youtube-date-watched-clear"
-
-
-# --- TV ---
-
-
-def test_tv_finished_sets_date_watched():
-    p = page(
-        R.TV,
-        {
-            "Status": status("Finished"),
-            "Date Watched": dateval(None),
-            "Title": {"title": [{"plain_text": "TV"}]},
-        },
-    )
-    v = evaluate(R.TV, p, NOW)
-    assert v[0].rule == "tv-date-watched-set"
-
-
-def test_tv_not_started_clears_date_watched():
-    p = page(
-        R.TV,
-        {
-            "Status": status("Not Started"),
-            "Date Watched": dateval("2026-08-01"),
-            "Title": {"title": [{"plain_text": "TV"}]},
-        },
-    )
-    v = evaluate(R.TV, p, NOW)
-    assert v[0].rule == "tv-date-watched-clear"
-
-
 # --- Movies ---
 
 
