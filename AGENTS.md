@@ -73,3 +73,11 @@ The code is generic, but the workflow is wired to Alex's setup for
 convenience: secrets flow through his 1Password (`.env.tpl` with `op://`
 references; `op-project-bootstrap` is his private bootstrap script) and
 deploys target his Modal workspace.
+
+## Credential provisioning
+
+`op-project-bootstrap` calls `scripts/provision.py --batch modal-token` to
+mint one dedicated CI token pair. Open its stderr URL in the configured
+remote browser session and approve the displayed code. Both verified fields
+are saved together in the project vault through JSON stdin; no plaintext
+credential cache is written. Individual Modal field minting is refused.
