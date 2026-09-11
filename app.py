@@ -10,7 +10,7 @@ import json
 import modal
 from fastapi import HTTPException, Request
 
-APP_NAME = "notion-automations"  # also the Modal secret name (see justfile sync-secrets)
+APP_NAME = "reflex"  # also the Modal secret name (see justfile sync-secrets)
 
 app = modal.App(APP_NAME)
 

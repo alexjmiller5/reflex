@@ -1,5 +1,5 @@
 [project]
-name = "notion-automations"
+name = "reflex"
 version = "0.1.0"
 description = "All my Notion automations codified outside Notion - Modal cron dispatcher + webhook receiver"
 requires-python = ">=3.13"

@@ -12,7 +12,7 @@ bootstrap saves both fields to 1Password together through JSON stdin.
 import json
 import sys
 
-PROJECT = "notion-automations"
+PROJECT = "reflex"
 FIELDS = ("token-id", "token-secret")
 MAX_ATTEMPTS = 15
 

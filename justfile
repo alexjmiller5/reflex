@@ -19,14 +19,14 @@ fmt:
 
 # Stream logs from the deployed app
 logs:
-    modal app logs notion-automations
+    modal app logs reflex
 
 # Push .env.tpl secrets into the Modal secret store (no plaintext touches disk;
 # the modal CLI rejects process-substitution FIFOs, hence the stdin script).
 # This one calls the Modal SDK rather than the CLI, so the `modal` PATH wrapper
 # can't inject auth for it - op run does it instead.
 sync-secrets:
-    MODAL_TOKEN_ID=op://4eeyrkqibibn7k4j6rz2fbzvxm/2sfxybjpv3c3ohzxhf5qeken4a/token_id MODAL_TOKEN_SECRET=op://4eeyrkqibibn7k4j6rz2fbzvxm/2sfxybjpv3c3ohzxhf5qeken4a/token_secret op run --no-masking -- bash -c "op inject -i .env.tpl | uv run scripts/sync_secrets.py notion-automations"
+    MODAL_TOKEN_ID=op://4eeyrkqibibn7k4j6rz2fbzvxm/2sfxybjpv3c3ohzxhf5qeken4a/token_id MODAL_TOKEN_SECRET=op://4eeyrkqibibn7k4j6rz2fbzvxm/2sfxybjpv3c3ohzxhf5qeken4a/token_secret op run --no-masking -- bash -c "op inject -i .env.tpl | uv run scripts/sync_secrets.py reflex"
 
 deploy: test sync-secrets
     modal deploy app.py

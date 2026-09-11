@@ -1,4 +1,4 @@
-# notion-automations
+# reflex
 
 All of Alex's native Notion automations, codified as code and deployed on
 [Modal](https://modal.com): a daily cron dispatcher (recurring tasks,
@@ -24,15 +24,15 @@ See `AGENTS.md` for the architecture rule and stack.
 
 ## Bootstrap (one-time, manual)
 
-1. `op-project-bootstrap .env.tpl --repo alexjmiller5/notion-automations` -
-   creates the `Notion Automations` vault, the `Notion Automations ENV` item
+1. `op-project-bootstrap .env.tpl --repo alexjmiller5/reflex` -
+   creates the `Reflex` vault, the `Reflex ENV` item
    (one field per `.env.tpl` line - `NOTION_API_TOKEN` prompted,
    `NOTION_WEBHOOK_SECRET` left `CHANGEME` until the webhook step below fills
-   it in), AND the `Notion Automations CI Modal Token` deploy-token item (bootstrap
+   it in), AND the `Reflex CI Modal Token` deploy-token item (bootstrap
    scans `.github/workflows/*.yml` for `op://` refs and mints its fields via
    `scripts/provision.py`, which copies the canonical workspace token from
    the AI Agent vault - no prompt, nothing touches disk), plus the read-only
-   `notion-automations-ci` service account and the repo's
+   `reflex-ci` service account and the repo's
    `OP_SERVICE_ACCOUNT_TOKEN` GitHub secret.
    (Local `just dev` / `just run` need no `~/.modal.toml` either - the
    machine-wide `modal` wrapper injects the same 1P-held token.)
@@ -51,7 +51,7 @@ See `AGENTS.md` for the architecture rule and stack.
    - Notion POSTs a one-time verification payload to the endpoint; it's
      logged (`just logs`) and also shown directly in the integration UI -
      copy the token either place.
-   - `op item edit "Notion Automations ENV" --vault "Notion Automations" "NOTION_WEBHOOK_SECRET=<token>"`
+   - `op item edit "Reflex ENV" --vault "Reflex" "NOTION_WEBHOOK_SECRET=<token>"`
    - `just sync-secrets` to push it to the deployed Modal secret, then
      make a small test edit on any watched DB and confirm `just logs`
      shows the event handled (not a 401).
