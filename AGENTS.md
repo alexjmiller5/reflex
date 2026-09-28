@@ -1,8 +1,12 @@
 # AGENTS.md
 
-All of Alex's native Notion automations, codified as code and deployed on
-Modal: a daily cron dispatcher (recurring tasks, compliance reconciler) + a
-Notion webhook receiver (event-triggered rules).
+Alex's automations, codified as code and deployed on Modal: a daily cron
+dispatcher (recurring tasks into Notion Tasks, Christmas gift rows into
+life-data `gifts`, the credit-card keepalive, the compliance reconciler) + a
+Notion webhook receiver (event rules over the DBs still in Notion: Tasks,
+Projects, Synapse Executions). Migrated DBs (Books, Movies, Podcasts,
+Calendar, Trips, Gifts) are life-data tables now - their catalog enforces
+what the rules here used to, so no rule targets them.
 
 ## Architecture rule (the one that matters)
 

@@ -93,74 +93,37 @@ def test_non_data_source_parent_skipped():
 
 def test_unwatched_db_skipped():
     fake = FakeNotion(
-        {"p": {"id": "p", "url": "u", "parent": {"data_source_id": R.GIFTS}, "properties": {}}}
+        {
+            "p": {
+                "id": "p",
+                "url": "u",
+                "parent": {"data_source_id": "not-watched"},
+                "properties": {},
+            }
+        }
     )
     out = handle_event(event("p"), fake, NOW, bot_id="me")
-    assert out == [f"skipped: unwatched db {R.GIFTS}"]
+    assert out == ["skipped: unwatched db not-watched"]
     assert fake.updated == []
 
 
-def test_book_completion_gets_fix_applied():
+def test_project_completion_gets_fix_applied():
     fake = FakeNotion(
         {
             "p": {
                 "id": "p",
                 "url": "u",
-                "parent": {"data_source_id": R.BOOKS},
+                "parent": {"data_source_id": R.PROJECTS},
                 "properties": {
-                    "Status": {"status": {"name": "Finished"}},
-                    "Date Read": {"date": None},
-                    "Title": {"title": [{"plain_text": "B"}]},
+                    "Status": {"status": {"name": "Completed"}},
+                    "Completed Date": {"date": None},
+                    "Name": {"title": [{"plain_text": "P"}]},
                 },
             }
         }
     )
     handle_event(event("p"), fake, NOW, bot_id="me")
-    assert fake.updated and "Date Read" in fake.updated[0][1]
-
-
-def test_calendar_page_added_creates_companion_note():
-    fake = FakeNotion(
-        {
-            "p": {
-                "id": "p",
-                "url": "u",
-                "parent": {"data_source_id": R.CALENDAR},
-                "properties": {
-                    "Title": {"title": [{"plain_text": "Dinner"}]},
-                    "Notes": {"relation": []},
-                },
-            }
-        }
-    )
-    handle_event(event("p", etype="page.created"), fake, NOW, bot_id="me")
-    assert fake.created[0][0] == R.NOTES
-    assert fake.created[0][1]["Title"]["title"][0]["text"]["content"] == "Dinner Notes"
-    assert ("p", {"Notes": {"relation": [{"id": "new-note"}]}}) in fake.updated
-
-
-def test_trip_edit_syncs_linked_note_title():
-    fake = FakeNotion(
-        {
-            "trip": {
-                "id": "trip",
-                "url": "u",
-                "parent": {"data_source_id": R.TRIPS},
-                "properties": {
-                    "Name": {"title": [{"plain_text": "Japan"}]},
-                    "Notes": {"relation": [{"id": "note1"}]},
-                },
-            },
-            "note1": {
-                "id": "note1",
-                "url": "u",
-                "parent": {"data_source_id": R.NOTES},
-                "properties": {"Title": {"title": [{"plain_text": "Old Title"}]}},
-            },
-        }
-    )
-    handle_event(event("trip"), fake, NOW, bot_id="me")
-    assert ("note1", {"Title": {"title": [{"text": {"content": "Japan Notes"}}]}}) in fake.updated
+    assert fake.updated and "Completed Date" in fake.updated[0][1]
 
 
 class TestHandshakeToken:

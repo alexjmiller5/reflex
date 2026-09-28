@@ -7,8 +7,8 @@ this module stays pure of Modal.
 """
 
 from core.notion import task_properties
-from core.registry import CALENDAR, TASKS, TRIPS
-from core.rules import Violation, evaluate, title_of
+from core.registry import TASKS
+from core.rules import evaluate
 
 
 def reconcile(notion, dbs, since_iso, now, place_tags=()):
@@ -37,38 +37,6 @@ def reconcile(notion, dbs, since_iso, now, place_tags=()):
             if page["id"] in seen:
                 continue
             violations = evaluate(ds, page, now, place_tags=place_tags)
-            if ds == CALENDAR and not (page["properties"].get("Notes") or {}).get("relation"):
-                # webhook-only rule (see handlers.py) re-flagged here since a
-                # missed/failed webhook delivery would otherwise go unnoticed
-                violations = [
-                    *violations,
-                    Violation(
-                        "calendar-companion-note",
-                        page["id"],
-                        title_of(page["properties"]),
-                        page.get("url", ""),
-                        None,
-                    ),
-                ]
-            if ds == TRIPS:
-                # same invariant as handlers.py's live sync, re-checked here in
-                # case that webhook delivery was missed/failed - never fixed
-                # directly (a human decides the intended title), just flagged
-                trip_title = title_of(page["properties"])
-                desired = f"{trip_title} Notes"
-                for rel in (page["properties"].get("Notes") or {}).get("relation", []):
-                    note = notion.get_page(rel["id"])
-                    if title_of(note["properties"]) != desired:
-                        violations = [
-                            *violations,
-                            Violation(
-                                "trips-note-title",
-                                page["id"],
-                                trip_title,
-                                page.get("url", ""),
-                                None,
-                            ),
-                        ]
             if not violations:
                 continue
             seen.add(page["id"])

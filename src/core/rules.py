@@ -17,9 +17,6 @@ NY = ZoneInfo("America/New_York")
 TIMESTAMP_RULES = {
     R.TASKS: [("Status", "Completed Date", {"Completed"}, {"To Do", "In Progress"})],
     R.PROJECTS: [("Status", "Completed Date", {"Completed"}, {"To Do", "In progress"})],
-    R.BOOKS: [("Status", "Date Read", {"Finished"}, {"Not Started", "In Progress"})],
-    R.MOVIES: [("Status", "Date Watched", {"Finished"}, {"Not Started", "In Progress"})],
-    R.PODCASTS: [("Status", "Date Listened To", {"Finished"}, {"Not Started", "In Progress"})],
     # Synapse's Outcome -> Date Reviewed rule is handled in the SYNAPSE-specific
     # block in evaluate() instead of here: on page.created it must judge the
     # EFFECTIVE post-fix Outcome (after the auto-approve fix below), not the
@@ -66,10 +63,7 @@ def _date_set(props, prop):
 _SLUGS = {
     R.TASKS: "tasks",
     R.PROJECTS: "projects",
-    R.BOOKS: "books",
-    R.MOVIES: "movies",
     R.SYNAPSE: "synapse",
-    R.PODCASTS: "podcasts",
 }
 
 

@@ -9,12 +9,26 @@ from core.registry import TASKS, RecurringSpec, TaskTemplate, cc_keepalive_title
 RECIPIENTS = ("r1", "r2", "r3", "r4", "r5")
 CARDS = ("Card A", "Card B")
 
-# Recipient names live in Notion, not the repo, so the fake serves them the
-# way the People DB does.
-FAKE_PEOPLE = {
-    pid: {"properties": {"Name": {"title": [{"plain_text": f"Person{i} Surname"}]}}}
+# Recipient names live in life-data, not the repo, so the fake hub serves the
+# people rows and records the gift rows it is asked to push.
+FAKE_PEOPLE = [
+    {"id": pid, "name": f"Person{i} Surname", "deleted_at": None}
     for i, pid in enumerate(RECIPIENTS)
-}
+]
+
+
+class FakeHub:
+    def __init__(self, reject=None):
+        self.pushed, self.reject = [], reject
+
+    def pull_rows(self, table, columns):
+        assert table == "people"
+        return FAKE_PEOPLE
+
+    def push_rows(self, table, rows):
+        self.pushed.append((table, rows[0]))
+        return {"upserted": 1, "rejected": self.reject or []}
+
 
 PLANTS = RecurringSpec(
     key="water-plants",
@@ -55,9 +69,6 @@ class FakeNotion:
     def snapshots(self, ds, titles):
         return self._snaps.get(titles, [])
 
-    def get_page(self, page_id):
-        return FAKE_PEOPLE[page_id]
-
     def any_match(self, ds, filter):
         account = filter["and"][0]["select"]["equals"]
         return account not in self._inactive
@@ -69,29 +80,39 @@ class FakeNotion:
 
 def test_dispatch_creates_due_relative_task():
     fake = FakeNotion()  # no history -> every relative spec fires from anchor
-    dispatch(fake, date(2026, 8, 20), SPECS, CARDS)
+    dispatch(fake, date(2026, 8, 20), SPECS, CARDS, FakeHub())
     titles = [p["Name"]["title"][0]["text"]["content"] for _, p in fake.created]
     assert "Water the office plants" in titles
 
 
 def test_dispatch_open_task_suppresses():
     fake = FakeNotion()
-    specs = [_hydrate_recipients(s, fake)[0] if s.gift_recipients else s for s in SPECS]
+    specs = [_hydrate_recipients(s, FakeHub())[0] if s.gift_recipients else s for s in SPECS]
     fake._snaps = {
         s.match_titles: [TaskSnapshot(t, "To Do", None, None) for t in s.match_titles]
         for s in specs
     }
-    dispatch(fake, date(2026, 8, 20), SPECS, CARDS)
+    dispatch(fake, date(2026, 8, 20), SPECS, CARDS, FakeHub())
     assert fake.created == []
 
 
 def test_christmas_creates_gifts_and_blocked_chain():
-    fake = FakeNotion()
-    dispatch(fake, date(2026, 10, 15), SPECS, CARDS)
-    gifts = [(ds, p) for ds, p in fake.created if "Recipient(s)" in p]
+    fake, hub = FakeNotion(), FakeHub()
+    dispatch(fake, date(2026, 10, 15), SPECS, CARDS, hub)
     buys = [p for _, p in fake.created if "Blocked by" in p]
-    assert len(gifts) == 5 and len(buys) == 5
-    assert gifts[0][1]["Gift Date"]["date"]["start"] == "2026-12-25"  # computed year
+    assert len(hub.pushed) == 5 and len(buys) == 5
+    table, row = hub.pushed[0]
+    assert table == "gifts" and row["gift_on"] == "2026-12-25"  # computed year
+    assert row["description"] == "Person0 Surname's Christmas Gift 2026"
+    assert row["recipient_ids"] == ["r1"] and row["status"] == "To Do"
+    assert len(row["id"]) == 32 and row["updated_at"].endswith("Z")
+
+
+def test_rejected_gift_row_fails_the_run():
+    with pytest.raises(RuntimeError, match="rejected"):
+        dispatch(
+            FakeNotion(), date(2026, 10, 15), (CHRISTMAS,), CARDS, FakeHub(reject=[{"col": "x"}])
+        )
 
 
 def test_christmas_partial_batch_skips_existing_template_but_finishes_the_rest():
@@ -99,14 +120,14 @@ def test_christmas_partial_batch_skips_existing_template_but_finishes_the_rest()
     # person's Brainstorm task: only that one template + due already exists,
     # everything else (9 tasks + 5 gifts) is still missing and must be
     # created on retry, without duplicating the one that's already there
-    spec, _ = _hydrate_recipients(CHRISTMAS, FakeNotion())
+    spec, _ = _hydrate_recipients(CHRISTMAS, FakeHub())
     existing_template = spec.templates[0]
     existing_due = spec.anchor  # due_offset_days=0 for the first (Brainstorm) template
     snaps = {
         spec.match_titles: [TaskSnapshot(existing_template.title, "To Do", existing_due, None)]
     }
-    fake = FakeNotion(snaps=snaps)
-    dispatch(fake, spec.anchor, (CHRISTMAS,), CARDS)
+    fake, hub = FakeNotion(snaps=snaps), FakeHub()
+    dispatch(fake, spec.anchor, (CHRISTMAS,), CARDS, hub)
     christmas_titles = [
         p["Name"]["title"][0]["text"]["content"]
         for _, p in fake.created
@@ -114,12 +135,11 @@ def test_christmas_partial_batch_skips_existing_template_but_finishes_the_rest()
     ]
     assert christmas_titles.count(existing_template.title) == 0  # not duplicated
     assert len(christmas_titles) == len(spec.templates) - 1  # every other task created
-    gifts = [(ds, p) for ds, p in fake.created if "Recipient(s)" in p]
-    assert len(gifts) == 5  # gifts still created in full
+    assert len(hub.pushed) == 5  # gifts still created in full
 
 
 def test_hydration_builds_the_brainstorm_then_buy_pairs():
-    spec, full_names = _hydrate_recipients(CHRISTMAS, FakeNotion())
+    spec, full_names = _hydrate_recipients(CHRISTMAS, FakeHub())
     assert len(spec.templates) == 10 and len(full_names) == 5
     buys = [t for t in spec.templates if t.blocked_by_prev]
     assert len(buys) == 5 and all(t.due_offset_days == 30 for t in buys)
@@ -134,7 +154,7 @@ def test_hydration_builds_the_brainstorm_then_buy_pairs():
 
 def test_keepalive_creates_task_for_inactive_card_only():
     fake = FakeNotion(inactive_accounts=("Card B",))
-    dispatch(fake, date(2026, 8, 25), SPECS, CARDS)
+    dispatch(fake, date(2026, 8, 25), SPECS, CARDS, FakeHub())
     keepalive = [
         (ds, p)
         for ds, p in fake.created
@@ -154,7 +174,7 @@ def test_keepalive_open_task_suppresses():
         snaps={(title,): [TaskSnapshot(title, "To Do", date(2026, 8, 1), None)]},
         inactive_accounts=("Card B",),
     )
-    dispatch(fake, date(2026, 8, 25), SPECS, CARDS)
+    dispatch(fake, date(2026, 8, 25), SPECS, CARDS, FakeHub())
     titles = [p["Name"]["title"][0]["text"]["content"] for _, p in fake.created]
     assert title not in titles
 
@@ -165,4 +185,4 @@ def test_keepalive_fails_hard_on_unknown_card_option():
     fake = FakeNotion()
     fake.card_options = ("Card A",)  # Card B missing
     with pytest.raises(RuntimeError, match="Card B"):
-        dispatch(fake, date(2026, 8, 25), SPECS, CARDS)
+        dispatch(fake, date(2026, 8, 25), SPECS, CARDS, FakeHub())

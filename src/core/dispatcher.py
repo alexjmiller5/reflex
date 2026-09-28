@@ -1,33 +1,36 @@
 """Daily dispatcher: evaluate recurring specs, create what's due."""
 
+import secrets
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from core.notion import task_properties
 from core.planner import keepalive_due, next_occurrence
 from core.registry import (
-    GIFTS,
     KEEPALIVE_INACTIVE_DAYS,
     TASKS,
     TRANSACTIONS,
     TaskTemplate,
     cc_keepalive_title,
 )
-from core.rules import title_of
 
 
-def _hydrate_recipients(spec, notion):
-    """Build the Christmas templates from live Notion data.
+def _hydrate_recipients(spec, hub):
+    """Build the Christmas templates from live people rows.
 
-    People's names are personal data and are not stored in this repo or in
-    life-data - the spec row holds page ids, so the names come from Notion at
-    run time. Returns
-    the spec with templates/match_titles filled in, plus each recipient's full
-    name for the Gifts page title.
+    People's names are personal data and are not stored in this repo - the
+    spec row holds people ids, so the names come from the life-data `people`
+    table at run time. Returns the spec with templates/match_titles filled in,
+    plus each recipient's full name for the gift row.
     """
+    names = {
+        r["id"]: r["name"]
+        for r in hub.pull_rows("people", ("id", "name", "deleted_at"))
+        if not r.get("deleted_at")
+    }
     templates, full_names = [], {}
     for person_id in spec.gift_recipients:
-        full = title_of(notion.get_page(person_id)["properties"])
+        full = names[person_id]
         full_names[person_id] = full
         name = full.split()[0]
         templates.append(
@@ -54,13 +57,14 @@ def _hydrate_recipients(spec, notion):
     return hydrated, full_names
 
 
-def dispatch(notion, today, recurring, cards):
-    """recurring/cards come from the life-data tables (see registry loaders)."""
+def dispatch(notion, today, recurring, cards, hub):
+    """recurring/cards come from the life-data tables (see registry loaders);
+    `hub` (core.hub.HubClient) reads people and writes gift rows."""
     log = []
     for spec in recurring:
         full_names = {}
         if spec.gift_recipients:
-            spec, full_names = _hydrate_recipients(spec, notion)
+            spec, full_names = _hydrate_recipients(spec, hub)
         existing = notion.snapshots(TASKS, spec.match_titles)
         occ = next_occurrence(spec, existing, today)
         if not occ:
@@ -91,19 +95,22 @@ def dispatch(notion, today, recurring, cards):
             log.append(f"{spec.key}: created '{t.title}' due {due}")
         for person_id in spec.gift_recipients:
             name = full_names[person_id]
-            notion.create_page(
-                GIFTS,
-                {
-                    "Description": {
-                        "title": [{"text": {"content": f"{name}'s Christmas Gift {occ.due.year}"}}]
-                    },
-                    "Recipient(s)": {"relation": [{"id": person_id}]},
-                    "Status": {"status": {"name": "Not Started"}},
-                    "Occasion": {"select": {"name": "Christmas"}},
-                    "Gift Date": {"date": {"start": f"{occ.due.year}-12-25"}},
-                },
-            )
-            log.append(f"{spec.key}: created Gifts page for {person_id}")
+            row = {
+                "id": secrets.token_hex(16),
+                "description": f"{name}'s Christmas Gift {occ.due.year}",
+                "recipient_ids": [person_id],
+                "status": "To Do",
+                "occasion": "Christmas",
+                "gift_on": f"{occ.due.year}-12-25",
+                "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+                + "Z",
+            }
+            rejected = hub.push_rows("gifts", [row]).get("rejected") or []
+            if rejected:
+                raise RuntimeError(
+                    f"{spec.key}: life-data rejected the gift row for {person_id}: {rejected[0]}"
+                )
+            log.append(f"{spec.key}: created gifts row for {person_id}")
     # Fail hard (Modal emails on a failed schedule) if a Transactions-DB
     # overhaul renames a card option - a filter on a gone option matches
     # nothing, which would read as inactivity and create bogus tasks.
