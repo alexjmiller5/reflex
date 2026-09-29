@@ -30,6 +30,11 @@ def _hydrate_recipients(spec, hub):
     }
     templates, full_names = [], {}
     for person_id in spec.gift_recipients:
+        if person_id not in names:
+            raise RuntimeError(
+                f"{spec.key}: no live life-data people row for recipient id {person_id} - "
+                f"fix gift_recipients on the recurring_specs row (people ids are dashless)"
+            )
         full = names[person_id]
         full_names[person_id] = full
         name = full.split()[0]

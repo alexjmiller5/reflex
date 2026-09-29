@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -186,3 +187,12 @@ def test_keepalive_fails_hard_on_unknown_card_option():
     fake.card_options = ("Card A",)  # Card B missing
     with pytest.raises(RuntimeError, match="Card B"):
         dispatch(fake, date(2026, 8, 25), SPECS, CARDS, FakeHub())
+
+
+def test_hydration_names_the_recipient_id_missing_from_life_data():
+    # a gift_recipients id that no people row matches (wrong id format, a
+    # hard-deleted person) used to surface as a bare KeyError that killed
+    # the whole daily run - it has to say which id and which table to fix
+    spec = replace(CHRISTMAS, gift_recipients=("r1", "nope"))
+    with pytest.raises(RuntimeError, match="nope"):
+        _hydrate_recipients(spec, FakeHub())
