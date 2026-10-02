@@ -28,7 +28,16 @@ secrets = [modal.Secret.from_name(APP_NAME)]
 state = modal.Dict.from_name(f"{APP_NAME}-state", create_if_missing=True)
 
 
-@app.function(image=image, secrets=secrets, schedule=modal.Cron("30 11 * * *"), timeout=600)
+# Retries absorb transient Notion/hub 5xx blips (one 500 used to cost the whole
+# day). Safe because a rerun is idempotent: dispatch skips tasks that already
+# exist and the high-water mark only advances on a clean finish.
+@app.function(
+    image=image,
+    secrets=secrets,
+    schedule=modal.Cron("30 11 * * *"),
+    timeout=600,
+    retries=modal.Retries(max_retries=2, initial_delay=60.0),
+)
 def daily():
     """Recurring-task dispatch, then the compliance sweep over everything
     edited since the last run (state carries the high-water mark so a
