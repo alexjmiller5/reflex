@@ -39,7 +39,7 @@ def test_tasks_complete_without_completed_date():
             "Name": {"title": [{"plain_text": "T"}]},
         },
     )
-    v = evaluate(R.TASKS, p, NOW)
+    v = evaluate(R.TASKS, p, NOW, changed_properties={"Status"})
     assert [x.rule for x in v] == ["tasks-completed-date-set"]
     assert v[0].fix["Completed Date"]["date"]["start"].startswith("2026-08-20")
 
@@ -56,7 +56,7 @@ def test_tasks_open_with_completed_date_cleared():
             "Name": {"title": [{"plain_text": "T"}]},
         },
     )
-    v = evaluate(R.TASKS, p, NOW)
+    v = evaluate(R.TASKS, p, NOW, changed_properties={"Status"})
     assert v[0].rule == "tasks-completed-date-clear" and v[0].fix["Completed Date"]["date"] is None
 
 
@@ -72,7 +72,7 @@ def test_tasks_defaults_filled_only_if_empty():
             "Name": {"title": [{"plain_text": "T"}]},
         },
     )
-    rules = {x.rule: x for x in evaluate(R.TASKS, p, NOW)}
+    rules = {x.rule: x for x in evaluate(R.TASKS, p, NOW, created=True)}
     assert rules["tasks-default-due"].fix["Due Date"]["date"]["start"] == "2026-08-20"
     assert rules["tasks-default-tags"].fix["Tags"]["multi_select"] == [{"name": "Chore"}]
     assert rules["tasks-default-priority"].fix["Priority"]["select"]["name"] == "High"
@@ -90,9 +90,9 @@ def test_tasks_place_tag_exempt_from_default_due():
             "Name": {"title": [{"plain_text": "T"}]},
         },
     )
-    assert evaluate(R.TASKS, p, NOW, place_tags=("Lake House",)) == []
+    assert evaluate(R.TASKS, p, NOW, created=True, place_tags=("Lake House",)) == []
     # not configured as a place tag -> the default-due rule still applies
-    rules = {v.rule for v in evaluate(R.TASKS, p, NOW)}
+    rules = {v.rule for v in evaluate(R.TASKS, p, NOW, created=True)}
     assert "tasks-default-due" in rules
 
 
@@ -108,7 +108,7 @@ def test_projects_complete_sets_completed_date():
             "Title": {"title": [{"plain_text": "P"}]},
         },
     )
-    v = evaluate(R.PROJECTS, p, NOW)
+    v = evaluate(R.PROJECTS, p, NOW, changed_properties={"Status"})
     assert v[0].rule == "projects-completed-date-set"
 
 
@@ -121,7 +121,7 @@ def test_projects_in_progress_clears_completed_date():
             "Title": {"title": [{"plain_text": "P"}]},
         },
     )
-    v = evaluate(R.PROJECTS, p, NOW)
+    v = evaluate(R.PROJECTS, p, NOW, changed_properties={"Status"})
     assert v[0].rule == "projects-completed-date-clear"
 
 
@@ -154,19 +154,19 @@ def test_synapse_outcome_autoapprove():
 
 def test_synapse_remedied_checked_sets_date_remedied():
     p = _synapse_page(**{"Remedied?": {"checkbox": True}, "Date Remedied": dateval(None)})
-    v = evaluate(R.SYNAPSE, p, NOW)
+    v = evaluate(R.SYNAPSE, p, NOW, changed_properties={"Remedied?", "Outcome"})
     assert any(x.rule == "synapse-date-remedied-set" for x in v)
 
 
 def test_synapse_remedied_unchecked_clears_date_remedied():
     p = _synapse_page(**{"Remedied?": {"checkbox": False}, "Date Remedied": dateval("2026-08-01")})
-    v = evaluate(R.SYNAPSE, p, NOW)
+    v = evaluate(R.SYNAPSE, p, NOW, changed_properties={"Remedied?", "Outcome"})
     assert any(x.rule == "synapse-date-remedied-clear" for x in v)
 
 
 def test_synapse_outcome_reviewed_sets_date_reviewed():
     p = _synapse_page(Outcome=status("Successful Flow"), **{"Date Reviewed": dateval(None)})
-    v = evaluate(R.SYNAPSE, p, NOW)
+    v = evaluate(R.SYNAPSE, p, NOW, changed_properties={"Remedied?", "Outcome"})
     rules = {x.rule: x for x in v}
     assert (
         rules["synapse-date-reviewed-set"]
@@ -192,5 +192,5 @@ def test_synapse_created_autoapprove_also_sets_date_reviewed():
 
 def test_synapse_to_review_clears_date_reviewed():
     p = _synapse_page(Outcome=status("To Review"), **{"Date Reviewed": dateval("2026-08-01")})
-    v = evaluate(R.SYNAPSE, p, NOW)
+    v = evaluate(R.SYNAPSE, p, NOW, changed_properties={"Remedied?", "Outcome"})
     assert any(x.rule == "synapse-date-reviewed-clear" for x in v)

@@ -1,6 +1,6 @@
 """Daily compliance sweep: flag violations as remediation tasks; never fix
-directly (a human backfills the true event timestamps - the reconciler runs
-after the fact and can't know when things actually happened).
+directly. Only contradictory dates are violations; missing historical dates
+and creation defaults cannot be reconstructed from current page state.
 
 State (`since`) is persisted by the caller (app.py, via a modal.Dict) -
 this module stays pure of Modal.

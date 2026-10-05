@@ -38,6 +38,12 @@ and the specs-as-intent carry over as-is.
   `infra` skill).
 * Webhook endpoint is public (Notion can't send Modal proxy-auth headers) -
   authenticated instead by verifying the `X-Notion-Signature` HMAC.
+* Webhook rules are scoped to the event: defaults run only on `page.created`;
+  timestamps follow changes to their own status/checkbox property, resolved
+  from `updated_properties` IDs. Use the event timestamp, preserve existing
+  nonempty dates, and ignore unrelated edits and trashed pages. The daily
+  reconciler reports contradictory dates, but missing historical dates are
+  unknown, not permission to backfill dates or creation defaults.
 
 ## Stack
 

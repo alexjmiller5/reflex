@@ -67,7 +67,13 @@ _SLUGS = {
 }
 
 
-def evaluate(data_source_id, page, now, created=False, place_tags=()):
+def evaluate(data_source_id, page, now, created=False, place_tags=(), changed_properties=None):
+    """Evaluate a creation, specific property changes, or a read-only audit.
+
+    None means an audit: report contradictory dates, but never infer missing
+    historical timestamps or creation defaults from a page's current state.
+    Webhooks pass an explicit set, including an empty set for unrelated edits.
+    """
     props, out = page["properties"], []
     pid, purl, ptitle = page["id"], page.get("url", ""), title_of(props)
     slug = _SLUGS.get(data_source_id, "db")
@@ -75,17 +81,24 @@ def evaluate(data_source_id, page, now, created=False, place_tags=()):
     def viol(rule, fix):
         out.append(Violation(rule, pid, ptitle, purl, fix))
 
+    def triggered(prop):
+        return created or prop in (changed_properties or ())
+
     for status_prop, date_prop, set_on, clear_on in TIMESTAMP_RULES.get(data_source_id, []):
         s = _status(props, status_prop)
-        if s in set_on and not _date_set(props, date_prop):
+        if s in set_on and not _date_set(props, date_prop) and triggered(status_prop):
             viol(
                 f"{slug}-{date_prop.lower().replace(' ', '-')}-set",
                 {date_prop: {"date": {"start": now.astimezone(NY).isoformat()}}},
             )
-        elif s in clear_on and _date_set(props, date_prop):
+        elif (
+            s in clear_on
+            and _date_set(props, date_prop)
+            and (changed_properties is None or triggered(status_prop))
+        ):
             viol(f"{slug}-{date_prop.lower().replace(' ', '-')}-clear", {date_prop: {"date": None}})
 
-    if data_source_id == R.TASKS:
+    if data_source_id == R.TASKS and created:
         due_today = now.astimezone(NY).date().isoformat()
         existing_tags = [t["name"] for t in (props.get("Tags") or {}).get("multi_select", [])]
         # Place-tagged tasks (NOTION_TASKS_PLACE_TAGS) are done whenever the
@@ -99,12 +112,16 @@ def evaluate(data_source_id, page, now, created=False, place_tags=()):
 
     if data_source_id == R.SYNAPSE:
         remedied = (props.get("Remedied?") or {}).get("checkbox", False)
-        if remedied and not _date_set(props, "Date Remedied"):
+        if remedied and not _date_set(props, "Date Remedied") and triggered("Remedied?"):
             viol(
                 "synapse-date-remedied-set",
                 {"Date Remedied": {"date": {"start": now.astimezone(NY).isoformat()}}},
             )
-        elif not remedied and _date_set(props, "Date Remedied"):
+        elif (
+            not remedied
+            and _date_set(props, "Date Remedied")
+            and (changed_properties is None or triggered("Remedied?"))
+        ):
             viol("synapse-date-remedied-clear", {"Date Remedied": {"date": None}})
 
         effective_outcome = _status(props, "Outcome")
@@ -116,12 +133,20 @@ def evaluate(data_source_id, page, now, created=False, place_tags=()):
                 viol("synapse-outcome", {"Outcome": {"status": {"name": desired}}})
             effective_outcome = desired  # post-fix value, not the raw one
 
-        if effective_outcome in SYNAPSE_REVIEWED_STATUSES and not _date_set(props, "Date Reviewed"):
+        if (
+            effective_outcome in SYNAPSE_REVIEWED_STATUSES
+            and not _date_set(props, "Date Reviewed")
+            and triggered("Outcome")
+        ):
             viol(
                 f"{slug}-date-reviewed-set",
                 {"Date Reviewed": {"date": {"start": now.astimezone(NY).isoformat()}}},
             )
-        elif effective_outcome == "To Review" and _date_set(props, "Date Reviewed"):
+        elif (
+            effective_outcome == "To Review"
+            and _date_set(props, "Date Reviewed")
+            and (changed_properties is None or triggered("Outcome"))
+        ):
             viol(f"{slug}-date-reviewed-clear", {"Date Reviewed": {"date": None}})
 
     return out

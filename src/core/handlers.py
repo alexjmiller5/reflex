@@ -15,6 +15,8 @@ that shape this module:
 
 import hashlib
 import hmac
+from datetime import datetime
+from urllib.parse import unquote
 
 from core import registry as R
 from core.rules import evaluate
@@ -52,8 +54,12 @@ def handle_event(event, notion, now, bot_id, place_tags=()):
         return ["skipped: self-authored"]
     if event.get("entity", {}).get("type") != "page":
         return ["skipped: non-page entity"]
+    if event["type"] not in {"page.created", "page.properties_updated"}:
+        return ["skipped: unrelated event"]
 
     page = notion.get_page(event["entity"]["id"])
+    if page.get("in_trash") or page.get("archived"):
+        return ["skipped: trashed page"]
     ds = page["parent"].get("data_source_id")
     if not ds:
         return ["skipped: non-data-source parent"]
@@ -61,12 +67,26 @@ def handle_event(event, notion, now, bot_id, place_tags=()):
         return [f"skipped: unwatched db {ds}"]
 
     created = event["type"] == "page.created"
+    updated_ids = {unquote(pid) for pid in event.get("data", {}).get("updated_properties", [])}
+    changed = {
+        name
+        for name, prop in page["properties"].items()
+        if prop.get("id") and unquote(prop["id"]) in updated_ids
+    }
+    # Delayed deliveries must use the event's date, not the delivery day's date.
+    occurred = datetime.fromisoformat(event["timestamp"]) if event.get("timestamp") else now
+    # The payload has no old/new values. Never pair an older event with a
+    # newer fetched state. Notion's minute precision limits this comparison.
+    edited = page.get("last_edited_time")
+    if edited and datetime.fromisoformat(edited) > occurred:
+        return ["skipped: superseded event"]
     log = []
 
-    # 1. property rules (pure) - apply fixes
-    for v in evaluate(ds, page, now, created=created, place_tags=place_tags):
+    for v in evaluate(
+        ds, page, occurred, created=created, place_tags=place_tags, changed_properties=changed
+    ):
         if v.fix:
             notion.update_page(page["id"], v.fix)
-            log.append(f"applied {v.rule}")
+            log.append(f"applied {v.rule} page={page['id']}")
 
     return log or ["compliant"]

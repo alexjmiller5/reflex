@@ -1,9 +1,11 @@
 """Compliance reconciler tests. reconcile() only ever flags violations as
 remediation tasks in TASKS - it never writes fixes back to the source page
-(a human backfills the true event timestamps; the reconciler can't know
-them)."""
+Unknown historical timestamps are valid and never become backfill tasks.
+"""
 
 from datetime import datetime, timezone
+
+import pytest
 
 from core import registry as R
 from core.reconciler import reconcile
@@ -33,8 +35,8 @@ def bad_project(pid="b1"):
         "url": f"https://notion.so/{pid}",
         "parent": {"data_source_id": R.PROJECTS},
         "properties": {
-            "Status": {"status": {"name": "Completed"}},
-            "Completed Date": {"date": None},
+            "Status": {"status": {"name": "To Do"}},
+            "Completed Date": {"date": {"start": "2024-01-01"}},
             "Name": {"title": [{"plain_text": "Bad Project"}]},
         },
     }
@@ -47,7 +49,7 @@ def test_violation_creates_remediation_task_not_fix():
     ds, props = fake.created[0]
     assert ds == R.TASKS
     title = props["Name"]["title"][0]["text"]["content"]
-    assert "Bad Project" in title and "projects-completed-date-set" in title
+    assert "Bad Project" in title and "projects-completed-date-clear" in title
     assert props["Priority"]["select"]["name"] == "High"
     assert props["Tags"]["multi_select"] == [{"name": "Chore"}]
     assert props["Links"]["rich_text"][0]["text"]["content"] == "https://notion.so/b1"
@@ -56,7 +58,7 @@ def test_violation_creates_remediation_task_not_fix():
 
 def test_compliant_pages_create_nothing():
     good = bad_project()
-    good["properties"]["Completed Date"] = {"date": {"start": "2026-08-01"}}
+    good["properties"]["Completed Date"] = {"date": None}
     fake = FakeNotion({R.PROJECTS: [good]})
     logs, _ = reconcile(fake, frozenset({R.PROJECTS}), "2026-08-19T12:00:00+00:00", NOW)
     assert fake.created == []
@@ -97,3 +99,47 @@ def test_all_reachable_returns_a_mark():
     fake = FlakyNotion({R.PROJECTS: [bad_project()]}, broken_ds="not-a-real-ds")
     _, mark = reconcile(fake, frozenset({R.PROJECTS}), "2026-08-19T12:00:00+00:00", NOW)
     assert mark == NOW.isoformat()
+
+
+def test_unknown_historical_dates_do_not_create_backfill_tasks():
+    task = bad_project("historical-task")
+    task["parent"] = {"data_source_id": R.TASKS}
+    task["properties"].update(
+        {
+            "Status": {"status": {"name": "Completed"}},
+            "Completed Date": {"date": None},
+            "Due Date": {"date": None},
+            "Tags": {"multi_select": []},
+            "Priority": {"select": None},
+        }
+    )
+    fake = FakeNotion({R.TASKS: [task]})
+    logs, mark = reconcile(fake, frozenset({R.TASKS}), "2026-08-19T12:00:00Z", NOW)
+    assert fake.created == []
+    assert logs == []
+    assert mark == NOW.isoformat()
+
+
+@pytest.mark.parametrize(
+    "ds,props",
+    [
+        (
+            R.PROJECTS,
+            {"Status": {"status": {"name": "Completed"}}, "Completed Date": {"date": None}},
+        ),
+        (
+            R.SYNAPSE,
+            {
+                "Outcome": {"status": {"name": "Successful Flow"}},
+                "Date Reviewed": {"date": None},
+                "Remedied?": {"checkbox": True},
+                "Date Remedied": {"date": None},
+            },
+        ),
+    ],
+)
+def test_other_database_audits_preserve_unknown_timestamps(ds, props):
+    page = {"id": "historical", "properties": props}
+    fake = FakeNotion({ds: [page]})
+    reconcile(fake, frozenset({ds}), "2026-08-19T12:00:00Z", NOW)
+    assert fake.created == []
