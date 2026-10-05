@@ -166,6 +166,15 @@ def test_status_change_only_stamps_completion_at_event_time(property_id):
     ]
 
 
+def test_mixed_authors_do_not_hide_a_real_status_change():
+    page = historical_task("In Progress", {"start": "2026-01-01"})
+    fake = FakeNotion({page["id"]: page})
+    e = event(page["id"], updated=("s%40", "completed"))
+    e["authors"].append({"id": "me"})
+    handle_event(e, fake, NOW, bot_id="me")
+    assert fake.updated == [(page["id"], {"Completed Date": {"date": None}})]
+
+
 def test_reopening_only_clears_completion_when_status_changes():
     page = historical_task("To Do", {"start": "2024-01-01"})
     fake = FakeNotion({page["id"]: page})

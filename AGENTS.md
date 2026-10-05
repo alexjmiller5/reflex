@@ -44,6 +44,8 @@ and the specs-as-intent carry over as-is.
   nonempty dates, and ignore unrelated edits and trashed pages. The daily
   reconciler reports contradictory dates, but missing historical dates are
   unknown, not permission to backfill dates or creation defaults.
+  Skip self-authored events only when every author is Reflex; aggregated
+  events containing another author still need their property rules evaluated.
 
 ## Stack
 

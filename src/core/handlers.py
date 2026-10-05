@@ -50,7 +50,9 @@ def verify_signature(body, header, secret):
 
 
 def handle_event(event, notion, now, bot_id, place_tags=()):
-    if any(a.get("id") == bot_id for a in event.get("authors", [])):
+    authors = event.get("authors", [])
+    # Aggregation may combine our writes with a real user/integration change.
+    if authors and all(a.get("id") == bot_id for a in authors):
         return ["skipped: self-authored"]
     if event.get("entity", {}).get("type") != "page":
         return ["skipped: non-page entity"]
