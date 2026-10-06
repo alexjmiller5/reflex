@@ -54,9 +54,13 @@ def next_occurrence(spec, existing, today):
     # unless the occurrence is already fully handled (any status).
     d = spec.anchor
     latest_due = None
+    occurrence = 0
     while d <= today:
         latest_due = d
-        d = _step(d, spec)
+        occurrence += 1
+        d = add_months(spec.anchor, spec.interval_months * occurrence) + timedelta(
+            days=spec.interval_days * occurrence
+        )
     if latest_due is None:
         return None
     if spec.templates:
