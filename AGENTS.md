@@ -23,7 +23,10 @@ and the specs-as-intent carry over as-is.
 * **The recurring specs are DATA, not code - they live in life-data**, in the
   `recurring_specs` and `cc_keepalive_cards` tables (see the `data` skill),
   pulled from the hub at each `daily()` run and validated by
-  `registry.load_recurring`/`load_cards`. Changing a chore's cadence, title,
+  `registry.load_recurring`/`load_cards`. Fixed monthly series calculate each
+  occurrence from the original anchor; an anchor on day 31 means month-end
+  and recovers after shorter months. Relative series follow completion dates.
+  Changing a chore's cadence, title,
   or cards = `life sql UPDATE ...` - no commit, no deploy. Disable a spec by
   soft-deleting its row (`SET deleted_at = updated_at`); re-enable by
   clearing it. `registry.py` ships only the Notion data-source ids, the
