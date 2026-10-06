@@ -29,7 +29,7 @@ and the specs-as-intent carry over as-is.
   clearing it. `registry.py` ships only the Notion data-source ids, the
   dataclasses, and the row loaders. Personal spec content (chores, finances,
   people) must NEVER be committed to this repo - that's why it moved out.
-* The `DRY_RUN` env var (`Settings.dry_run`) gates all Notion writes -
+* The `DRY_RUN` env var (`Settings.dry_run`) gates all Notion and hub writes -
   when true, automations run their full logic and log what they would have
   written instead of calling the API.
 * Cron: Modal is the PREFERRED home for schedules - but the Starter plan
@@ -46,6 +46,14 @@ and the specs-as-intent carry over as-is.
   unknown, not permission to backfill dates or creation defaults.
   Skip self-authored events only when every author is Reflex; aggregated
   events containing another author still need their property rules evaluated.
+* Hub row scans exhaust bounded pages and retain tombstones for the caller
+  to interpret. They are not frozen snapshots. Insert-only writes require
+  stable caller-owned IDs and a complete inserted/existing receipt; a
+  partial rejection fails the operation. Conditional patches carry both
+  `updated_at` and `hub_at`. A conflict requires rereading and recomputing,
+  never falling back to an unconditional push. Dry-run inserts and patches
+  return no committed receipt. The deployed event rules still use the
+  Notion adapter; these primitives do not select or switch a backend.
 
 ## Stack
 
