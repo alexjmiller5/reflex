@@ -196,3 +196,26 @@ def test_hydration_names_the_recipient_id_missing_from_life_data():
     spec = replace(CHRISTMAS, gift_recipients=("r1", "nope"))
     with pytest.raises(RuntimeError, match="nope"):
         _hydrate_recipients(spec, FakeHub())
+
+
+def test_dispatch_month_end_after_short_month():
+    spec = RecurringSpec(
+        key="monthly-review",
+        mode="fixed",
+        anchor=date(2025, 1, 31),
+        interval_months=1,
+        match_titles=("Monthly review",),
+        templates=(TaskTemplate(title="Monthly review", tags=(), priority="Medium"),),
+    )
+    fake = FakeNotion(
+        snaps={
+            spec.match_titles: [
+                TaskSnapshot("Monthly review", "Completed", date(2025, 2, 28), None)
+            ]
+        }
+    )
+    dispatch(fake, date(2025, 3, 28), (spec,), (), FakeHub())
+    assert fake.created == []
+    dispatch(fake, date(2025, 3, 31), (spec,), (), FakeHub())
+    assert len(fake.created) == 1
+    assert fake.created[0][1]["Due Date"]["date"]["start"] == "2025-03-31"

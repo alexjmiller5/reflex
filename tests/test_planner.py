@@ -94,6 +94,24 @@ class TestRelative:
 
 
 class TestFixed:
+    def test_month_end_series_recovers_after_short_months(self):
+        spec = fix(interval_months=1, anchor=date(2025, 1, 31))
+        expected = [
+            date(2025, 2, 28),
+            date(2025, 3, 31),
+            date(2025, 4, 30),
+            date(2025, 5, 31),
+            date(2028, 2, 29),
+            date(2028, 3, 31),
+        ]
+        for due in expected:
+            assert next_occurrence(spec, [], today=due).due == due
+
+    def test_month_end_does_not_fire_early_after_short_month(self):
+        spec = fix(interval_months=1, anchor=date(2025, 1, 31))
+        existing = [snap("T", DONE, due=date(2025, 2, 28))]
+        assert next_occurrence(spec, existing, today=date(2025, 3, 28)) is None
+
     def test_not_yet_due(self):
         assert next_occurrence(fix(), [], today=date(2026, 9, 19)) is None
 
