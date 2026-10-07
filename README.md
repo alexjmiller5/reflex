@@ -157,3 +157,28 @@ Card keepalive checks still read the existing Notion Transactions source. Their
 task output uses the selected Life Data binding, stable runtime `card_keys` and
 `keepalive_defaults`; migrating Tasks does not silently change the financial
 activity reader. An absent task binding preserves the existing Notion writer.
+
+## Season-completion reminders
+
+`LIFE_SEASON_REMINDERS_CONFIG` optionally adds prospective reminders to the
+existing daily dispatch. It requires `LIFE_TASKS_CONFIG`; neither setting is
+enabled by deployment alone. Supply these runtime bindings:
+
+- `shows`: `table`, `title_column`.
+- `episodes`: `table`, `show_column`, `season_column`, `number_column`,
+  `status_column`, `finished_value`.
+- `seasons`: `table`, `show_column`, `season_column`, `total_column`.
+  Totals must describe the entire season, including unreleased episodes.
+- `title_prefixes`: selected edition title prefixes.
+- `title_template`: template with `{title}` and `{season}` placeholders.
+- `task_values`: initial values keyed by actual task column names. These cannot
+  override identity, title or due date; task bindings supply the latter columns.
+
+Positive seasons require exactly episodes 1 through the declared total, all
+watched and live. Specials are excluded. Missing totals do not mean finished.
+The initial scan retains already-completed seasons without creating reminders;
+review that baseline before activation. Later completions create one stable
+occurrence per show ID and season. Frozen intent survives ambiguous responses,
+and existing tasks, including completed or deleted ones, remain unchanged.
+Previously observed episode IDs remain required even if a later scan omits them.
+All inventories must finish successfully before a journal update or task insert.
