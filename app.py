@@ -108,6 +108,16 @@ def _daily(s, journal, now):
     ):
         print(line)
 
+    if s.life_season_reminders_config is not None:
+        from core.season_reminders import dispatch_seasons
+
+        if s.life_tasks_config is None:
+            raise ValueError("season reminders require the Life Data Tasks binding")
+        for line in dispatch_seasons(
+            hub, journal, s.life_season_reminders_config, s.life_tasks_config, today
+        ):
+            print(line)
+
     since = (
         journal.get("high_water")
         or state.get("high_water")

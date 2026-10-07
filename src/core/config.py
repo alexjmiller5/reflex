@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     dry_run: bool = False
     life_event_policy: dict | None = None
     life_tasks_config: dict | None = None
+    life_season_reminders_config: dict | None = None
     notion_retired_sources: str = ""
 
     @field_validator("life_event_policy")

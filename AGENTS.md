@@ -68,6 +68,13 @@ and the specs-as-intent carry over as-is.
   is journaled before inserts; partial recovery retains dependency edges.
   Missing adopted targets fail closed. Card activity remains a Notion read;
   switching task output does not switch that reader.
+* `season_reminders.py` owns optional prospective season-completion reminders
+  selected by `LIFE_SEASON_REMINDERS_CONFIG` alongside `LIFE_TASKS_CONFIG`.
+  Runtime bindings supply shows, episodes and authoritative season totals.
+  A contiguous full season must be watched; missing totals never imply completion.
+  The first complete scan baselines existing completed seasons without backfill.
+  Retained episode identities prevent disappearance from fabricating completion.
+  Frozen plans precede insert-only delivery and preserve existing tombstones.
 * Hub row scans exhaust bounded pages and retain tombstones for the caller
   to interpret. They are not frozen snapshots. Insert-only writes require
   stable caller-owned IDs and a complete inserted/existing receipt; a
