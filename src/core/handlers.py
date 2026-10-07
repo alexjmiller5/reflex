@@ -49,7 +49,7 @@ def verify_signature(body, header, secret):
     return hmac.compare_digest(expected, header)
 
 
-def handle_event(event, notion, now, bot_id, place_tags=()):
+def handle_event(event, notion, now, bot_id, place_tags=(), retired_sources=()):
     authors = event.get("authors", [])
     # Aggregation may combine our writes with a real user/integration change.
     if authors and all(a.get("id") == bot_id for a in authors):
@@ -65,6 +65,8 @@ def handle_event(event, notion, now, bot_id, place_tags=()):
     ds = page["parent"].get("data_source_id")
     if not ds:
         return ["skipped: non-data-source parent"]
+    if ds in retired_sources:
+        return ["skipped: migrated source"]
     if ds not in EVENT_DBS:
         return [f"skipped: unwatched db {ds}"]
 

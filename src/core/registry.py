@@ -28,6 +28,7 @@ class TaskTemplate:
     links: str = ""
     notes: str = ""
     blocked_by_prev: bool = False
+    key: str = ""  # stable template identity required by the Life Data writer
 
 
 @dataclass(frozen=True)

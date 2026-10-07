@@ -106,6 +106,7 @@ class NotionClient:
                 comp = (pr["Completed Date"]["date"] or {}).get("start")
                 snaps.append(
                     TaskSnapshot(
+                        id=p["id"],
                         title=title,
                         status=pr["Status"]["status"]["name"],
                         due=date.fromisoformat(due[:10]) if due else None,

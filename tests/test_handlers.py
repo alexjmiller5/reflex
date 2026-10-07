@@ -261,3 +261,13 @@ class TestHandshakeToken:
 
     def test_ordinary_event_is_never_a_handshake(self):
         assert handshake_token({"type": "page.created"}, "") is None
+
+
+def test_retired_source_never_receives_old_notion_automation():
+    page = {"id": "p", "parent": {"data_source_id": R.TASKS}, "properties": {}}
+    fake = FakeNotion({"p": page})
+    result = handle_event(
+        event("p", etype="page.created"), fake, NOW, bot_id="me", retired_sources=(R.TASKS,)
+    )
+    assert result == ["skipped: migrated source"]
+    assert fake.updated == [] and fake.created == []

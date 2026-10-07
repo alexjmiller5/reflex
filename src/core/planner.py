@@ -13,6 +13,7 @@ class TaskSnapshot:
     status: str
     due: date | None
     completed: date | None
+    id: str = ""
 
 
 @dataclass(frozen=True)

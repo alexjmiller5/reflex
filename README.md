@@ -77,3 +77,83 @@ backfill tasks.
 - `just run` - **not a dry run** - triggers `daily()` once against real Modal
   infra (ephemeral container, not the deployed schedule) and performs real
   writes to Notion.
+
+## Life Data workflow events
+
+The scheduled `daily` function is a serialized one-minute tick. Recurring dispatch
+and the remaining Notion compliance sweep still become due at 11:30 UTC and run
+once per due day. Failed ticks do not advance the durable success marker. The
+existing schedule slot is reused.
+
+`LIFE_EVENT_POLICY` is optional JSON runtime configuration containing a
+`subscription_id` and `tables` object. Each table policy names its columns,
+transition values, creation defaults, timezone and optional day boundary. No
+policy means no Life Data event writes. `NOTION_RETIRED_SOURCES` is an explicit
+comma-separated list of migrated Notion data source IDs; it disables their old
+webhook rules and compliance sweeps without disabling unrelated sources.
+
+The subscription must advertise `durable-pull-v1` and `scalar-lifecycle-v1`, watch
+exactly the configured policy columns, and enable `lifecycle: true` for every
+source. The caller needs only the selected table reads/writes and the exact
+subscription consume grant. Conditional effects require `revision-v1`.
+
+Reflex owns the `reflex-events` Modal Volume. Its journal stores the watched
+projection, pending effects, delivery receipts and daily success marker. Each
+assignment commits to the volume before delivery acknowledgment. Only the
+serialized `daily` function writes this journal. Do not mount it into another
+writer or run overlapping deployment versions. Pause event execution and drain
+the old invocation before replacing an active consumer deployment; resume after
+the new version has loaded the same checkpoint. Local file locking protects
+same-container invocations, not distributed writers.
+
+Before activation, reconcile a frozen baseline against the subscription cursor.
+Do not use an ordinary paginated scan as a frozen snapshot. Keep the resulting
+JSON outside the repository:
+
+```json
+{"through_seq":"0","tables":{"records":[{"id":"record-1","state":"Open","finished":null,"deleted_at":null}]}}
+```
+
+Install it through the supported serialized operator entrypoint:
+
+```sh
+modal run app.py --seed-file /path/to/private-baseline.json
+```
+
+The entrypoint calls the deployed worker and refuses an existing seed or a
+checkpoint different from the hub's acknowledged cursor. A policy change
+requires deliberate reconciliation and a new subscription; it cannot silently
+reinterpret the old journal. Seeding does not infer completion dates or apply
+creation defaults to historical rows. `DRY_RUN` never persists consumer state,
+acknowledges deliveries, patches rows or advances daily success; a preview that
+cannot read beyond the outstanding batch is explicitly incomplete.
+
+Retries fold actual event order and retain manual date edits. Deletes discard
+queued effects; restores are not new creations. Before each conditional patch,
+the consumer reads the live row, drains through a subsequently captured
+subscription high-water mark, then uses both row revision fields. Lost replies
+are resolved by replaying subscription events rather than resending an
+unconditional write.
+
+### Recurring task writer
+
+`LIFE_TASKS_CONFIG` independently selects the Life Data task adapter. It contains
+`table`, `time_zone`, semantic-to-catalog `columns` (title, status, due, completed,
+tags, priority, notes, links, blocked_by), creation `defaults`, and optional
+`adoptions`. Each recurring template has a stable `key` separate from its title.
+An adoption names `spec_key`, `occurrence` (date label), `template_key` and
+`target_id`. Accepted mappings are retained in the journal even when no new task
+is due. Removing configuration cannot erase or rebind them; a missing adopted
+target fails closed, and a tombstoned target remains handled.
+
+The writer saves the entire occurrence before its first insert, including IDs,
+field values and dependency links. Recovery completes that saved intent before
+planning later occurrences. Existing identities are never overwritten. Gift
+bindings add their own table/columns, defaults, description/date templates and
+optional task links to the same retained occurrence. Failed gift creation is
+recoverable even after all related tasks were created.
+
+Card keepalive checks still read the existing Notion Transactions source. Their
+task output uses the selected Life Data binding, stable runtime `card_keys` and
+`keepalive_defaults`; migrating Tasks does not silently change the financial
+activity reader. An absent task binding preserves the existing Notion writer.

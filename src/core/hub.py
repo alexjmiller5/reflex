@@ -5,6 +5,7 @@ people names the Christmas generator needs; pushes the gift rows it creates.
 """
 
 import httpx
+from urllib.parse import quote
 
 
 class HubClient:
@@ -20,6 +21,38 @@ class HubClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+    def _get(self, path):
+        resp = httpx.get(
+            f"{self.url}{path}",
+            headers={"Authorization": f"Bearer {self.token}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def session(self):
+        return self._get("/v1/session")
+
+    def subscription_status(self, subscription_id):
+        return self._get(f"/v1/subscriptions/{quote(subscription_id, safe='')}")
+
+    def poll_events(self, subscription_id):
+        return self._get(f"/v1/subscriptions/{quote(subscription_id, safe='')}/events?wait=0")
+
+    def acknowledge(self, subscription_id, delivery_id):
+        if self.dry_run:
+            return None
+        return self._post(
+            f"/v1/subscriptions/{quote(subscription_id, safe='')}/ack",
+            {"delivery_id": delivery_id},
+        )
+
+    def read_row(self, table, row_id, columns):
+        rows = self.pull_rows(table, columns, where={"id": row_id})
+        if len(rows) > 1 or (rows and rows[0].get("id") != row_id):
+            raise RuntimeError("hub returned an ambiguous row identity")
+        return rows[0] if rows else None
 
     def pull_rows(self, table: str, columns, *, since="", where=None) -> list[dict]:
         """Exhaust bounded pages, including tombstones; a failed page raises.
@@ -81,7 +114,7 @@ class HubClient:
         if self.dry_run:
             print(f"DRY RUN patch {table}/{row_id}: {sorted(values)}")
             return None
-        return self._post(
+        receipt = self._post(
             "/v1/rows/patch",
             {
                 "table": table,
@@ -90,6 +123,15 @@ class HubClient:
                 "expected_revision": expected_revision,
             },
         )
+        revision = receipt.get("revision")
+        if (
+            receipt.get("id") != row_id
+            or not isinstance(revision, dict)
+            or not isinstance(revision.get("updated_at"), str)
+            or not isinstance(revision.get("hub_at"), str)
+        ):
+            raise RuntimeError("hub returned an invalid patch receipt")
+        return receipt
 
     def push_rows(self, table: str, rows: list[dict]) -> dict:
         """Upsert rows; the hub validates them against the catalog and returns

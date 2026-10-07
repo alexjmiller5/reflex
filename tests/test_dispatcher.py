@@ -219,3 +219,21 @@ def test_dispatch_month_end_after_short_month():
     dispatch(fake, date(2025, 3, 31), (spec,), (), FakeHub())
     assert len(fake.created) == 1
     assert fake.created[0][1]["Due Date"]["date"]["start"] == "2025-03-31"
+
+
+def test_notion_partial_occurrence_restores_existing_blocker_identity():
+    spec, _ = _hydrate_recipients(CHRISTMAS, FakeHub())
+    template = spec.templates[0]
+    snapshots = {
+        spec.match_titles: [
+            TaskSnapshot(template.title, "To Do", spec.anchor, None, id="existing-preparation")
+        ]
+    }
+    notion = FakeNotion(snaps=snapshots)
+    dispatch(notion, spec.anchor, (CHRISTMAS,), (), FakeHub())
+    first_buy = next(
+        props
+        for _, props in notion.created
+        if props["Name"]["title"][0]["text"]["content"] == spec.templates[1].title
+    )
+    assert first_buy["Blocked by"]["relation"] == [{"id": "existing-preparation"}]

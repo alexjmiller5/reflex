@@ -14,8 +14,9 @@ what the rules here used to, so no rule targets them.
 imports `modal` - it is the deployment shim (image, secrets, endpoints,
 schedules). Within `src/core/`, only `notion.py` (Notion API) and `hub.py`
 (life-data hub) do network I/O - every other module (`registry.py`,
-`planner.py`, `rules.py`, `reconciler.py`) is pure functions: dataclasses and
-dicts in, decisions out. This keeps the logic trivially testable and
+`planner.py`, `rules.py`) is pure functions: dataclasses and dicts in, decisions
+out. Orchestrators consume injected clients; `event_state.py` alone owns the
+local durable journal. This keeps the logic trivially testable and
 portable - no backend abstraction, no `TaskBackend` interface; a future
 migration off Notion rewrites `notion.py` and the event rules, the planner
 and the specs-as-intent carry over as-is.
@@ -35,6 +36,13 @@ and the specs-as-intent carry over as-is.
 * The `DRY_RUN` env var (`Settings.dry_run`) gates all Notion and hub writes -
   when true, automations run their full logic and log what they would have
   written instead of calling the API.
+* The one-minute `daily` tick serializes event delivery and owns the
+  `reflex-events` Modal Volume. Volume commits precede hub acknowledgments;
+  one function/container owns the journal. Stop and drain an active consumer
+  before replacing its deployment. Daily dispatch remains due at 11:30 UTC
+  with a durable success marker. Runtime policy and reconciled seed are
+  operator state, never repository content. Notion sources are retired only
+  by explicit runtime IDs; no event policy leaves that backend selected.
 * Cron: Modal is the PREFERRED home for schedules - but the Starter plan
   allows **5 deployed crons across ALL apps**, so track the budget. This app
   uses one slot. Overflow goes to GHA cron or CF Cron Triggers (see the
@@ -49,14 +57,25 @@ and the specs-as-intent carry over as-is.
   unknown, not permission to backfill dates or creation defaults.
   Skip self-authored events only when every author is Reflex; aggregated
   events containing another author still need their property rules evaluated.
+* `rules.evaluate_transition` is the pure Life Data policy evaluator. Column
+  names, status values, defaults, excluded tags, timezone and optional day
+  boundary come from runtime policy. It uses event time, preserves supplied
+  values and explicit date edits, and never applies creation defaults to a
+  historical seed or an unrelated edit. The Notion evaluator remains separate.
+* `life_dispatch.py` owns the optional recurring task adapter, selected by
+  `LIFE_TASKS_CONFIG`. Stable template keys and retained occurrence/adoption
+  mappings preserve IDs across retries and title edits. Whole task/gift intent
+  is journaled before inserts; partial recovery retains dependency edges.
+  Missing adopted targets fail closed. Card activity remains a Notion read;
+  switching task output does not switch that reader.
 * Hub row scans exhaust bounded pages and retain tombstones for the caller
   to interpret. They are not frozen snapshots. Insert-only writes require
   stable caller-owned IDs and a complete inserted/existing receipt; a
   partial rejection fails the operation. Conditional patches carry both
   `updated_at` and `hub_at`. A conflict requires rereading and recomputing,
   never falling back to an unconditional push. Dry-run inserts and patches
-  return no committed receipt. The deployed event rules still use the
-  Notion adapter; these primitives do not select or switch a backend.
+  return no committed receipt. The optional Life Data consumer is
+  selected by runtime policy; transport availability does not switch authority.
 
 ## Stack
 
