@@ -60,3 +60,26 @@ def test_any_match_single_request():
 
     assert make_client(handler).any_match("ds", {"f": 1}) is True
     assert calls == [{"page_size": 1, "filter": {"f": 1}}]  # no pagination follow-up
+
+
+def test_snapshot_preserves_source_page_identity_for_partial_recovery():
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "has_more": False,
+                "results": [
+                    {
+                        "id": "existing-task",
+                        "properties": {
+                            "Due Date": {"date": {"start": "2026-01-01"}},
+                            "Completed Date": {"date": None},
+                            "Status": {"status": {"name": "To Do"}},
+                        },
+                    }
+                ],
+            },
+        )
+
+    snapshot = make_client(handler).snapshots("source", ("Task",))[0]
+    assert snapshot.id == "existing-task"

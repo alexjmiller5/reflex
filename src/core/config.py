@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     notion_tasks_place_tags: str = ""  # comma-separated Tags exempt from the default due date
     dry_run: bool = False
     life_event_policy: dict | None = None
+    life_tasks_config: dict | None = None
     notion_retired_sources: str = ""
 
     @field_validator("life_event_policy")

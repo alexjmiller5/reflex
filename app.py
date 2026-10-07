@@ -103,7 +103,9 @@ def _daily(s, journal, now):
     hub = HubClient(s.life_hub_url, s.life_hub_token, dry_run=s.dry_run)
     recurring = load_recurring(hub.pull_rows("recurring_specs", SPEC_COLUMNS))
     cards = load_cards(hub.pull_rows("cc_keepalive_cards", CARD_COLUMNS))
-    for line in dispatch(notion, today, recurring, cards, hub):
+    for line in dispatch(
+        notion, today, recurring, cards, hub, task_config=s.life_tasks_config, state=journal
+    ):
         print(line)
 
     since = (

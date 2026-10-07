@@ -41,6 +41,7 @@ def _hydrate_recipients(spec, hub):
         templates.append(
             TaskTemplate(
                 title=f"Brainstorm and come up with an idea for {name}'s Christmas Gift",
+                key=person_id + ":brainstorm",
                 tags=("Gifts",),
                 priority="High",
             )
@@ -48,6 +49,7 @@ def _hydrate_recipients(spec, hub):
         templates.append(
             TaskTemplate(
                 title=f"Buy {name}'s Christmas Gift",
+                key=person_id + ":buy",
                 tags=("Gifts",),
                 priority="High",
                 due_offset_days=30,
@@ -62,9 +64,15 @@ def _hydrate_recipients(spec, hub):
     return hydrated, full_names
 
 
-def dispatch(notion, today, recurring, cards, hub):
+def dispatch(notion, today, recurring, cards, hub, *, task_config=None, state=None):
     """recurring/cards come from the life-data tables (see registry loaders);
     `hub` (core.hub.HubClient) reads people and writes gift rows."""
+    if task_config is not None:
+        from core.life_dispatch import dispatch_life
+
+        if state is None:
+            raise ValueError("Life Data task dispatch requires a durable journal")
+        return dispatch_life(notion, today, recurring, cards, hub, state, task_config)
     log = []
     for spec in recurring:
         full_names = {}
@@ -78,13 +86,11 @@ def dispatch(notion, today, recurring, cards, hub):
         prev_id = ""
         for t in spec.templates:
             due = occ.due + timedelta(days=t.due_offset_days)
-            if any(s.title == t.title and s.due == due for s in existing):
-                # partial-batch recovery: this template was already created by
-                # a prior (crashed/partial) run - don't duplicate it. We can't
-                # recover its page id from a TaskSnapshot (no id field), so a
-                # still-missing blocked_by_prev task loses its Blocked-by link
-                # in this edge case; add id-fetching here if that proves needed.
-                prev_id = ""
+            matches = [s for s in existing if s.title == t.title and s.due == due]
+            if matches:
+                if len(matches) > 1:
+                    raise ValueError("ambiguous recurring task identity")
+                prev_id = matches[0].id
                 log.append(f"{spec.key}: '{t.title}' already exists due {due}, skipping")
                 continue
             props = task_properties(

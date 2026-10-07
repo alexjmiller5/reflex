@@ -62,6 +62,12 @@ and the specs-as-intent carry over as-is.
   boundary come from runtime policy. It uses event time, preserves supplied
   values and explicit date edits, and never applies creation defaults to a
   historical seed or an unrelated edit. The Notion evaluator remains separate.
+* `life_dispatch.py` owns the optional recurring task adapter, selected by
+  `LIFE_TASKS_CONFIG`. Stable template keys and retained occurrence/adoption
+  mappings preserve IDs across retries and title edits. Whole task/gift intent
+  is journaled before inserts; partial recovery retains dependency edges.
+  Missing adopted targets fail closed. Card activity remains a Notion read;
+  switching task output does not switch that reader.
 * Hub row scans exhaust bounded pages and retain tombstones for the caller
   to interpret. They are not frozen snapshots. Insert-only writes require
   stable caller-owned IDs and a complete inserted/existing receipt; a

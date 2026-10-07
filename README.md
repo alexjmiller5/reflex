@@ -134,3 +134,26 @@ the consumer reads the live row, drains through a subsequently captured
 subscription high-water mark, then uses both row revision fields. Lost replies
 are resolved by replaying subscription events rather than resending an
 unconditional write.
+
+### Recurring task writer
+
+`LIFE_TASKS_CONFIG` independently selects the Life Data task adapter. It contains
+`table`, `time_zone`, semantic-to-catalog `columns` (title, status, due, completed,
+tags, priority, notes, links, blocked_by), creation `defaults`, and optional
+`adoptions`. Each recurring template has a stable `key` separate from its title.
+An adoption names `spec_key`, `occurrence` (date label), `template_key` and
+`target_id`. Accepted mappings are retained in the journal even when no new task
+is due. Removing configuration cannot erase or rebind them; a missing adopted
+target fails closed, and a tombstoned target remains handled.
+
+The writer saves the entire occurrence before its first insert, including IDs,
+field values and dependency links. Recovery completes that saved intent before
+planning later occurrences. Existing identities are never overwritten. Gift
+bindings add their own table/columns, defaults, description/date templates and
+optional task links to the same retained occurrence. Failed gift creation is
+recoverable even after all related tasks were created.
+
+Card keepalive checks still read the existing Notion Transactions source. Their
+task output uses the selected Life Data binding, stable runtime `card_keys` and
+`keepalive_defaults`; migrating Tasks does not silently change the financial
+activity reader. An absent task binding preserves the existing Notion writer.
