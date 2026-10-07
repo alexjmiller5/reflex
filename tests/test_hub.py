@@ -219,3 +219,73 @@ def test_dry_run_makes_no_writes_and_claims_no_committed_receipt(hub):
         )
         is None
     )
+
+
+def test_subscription_reads_and_ack_use_supported_endpoints(hub, monkeypatch):
+    seen = []
+
+    def handler(request):
+        assert request.headers["Authorization"] == "Bearer test-token"
+        seen.append((request.method, request.url.path, request.url.query))
+        if request.method == "POST":
+            assert json.loads(request.content) == {"delivery_id": "delivery"}
+        return httpx.Response(200, json={"ok": True})
+
+    client = hub(handler)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
+        monkeypatch.setattr(httpx, "get", transport.get)
+        assert client.session() == {"ok": True}
+        assert client.subscription_status("sub") == {"ok": True}
+        assert client.poll_events("sub") == {"ok": True}
+        assert client.acknowledge("sub", "delivery") == {"ok": True}
+    assert seen == [
+        ("GET", "/v1/session", b""),
+        ("GET", "/v1/subscriptions/sub", b""),
+        ("GET", "/v1/subscriptions/sub/events", b"wait=0"),
+        ("POST", "/v1/subscriptions/sub/ack", b""),
+    ]
+
+
+def test_dry_run_never_acknowledges(hub):
+    def forbidden(request):
+        raise AssertionError("no acknowledgment in dry-run")
+
+    assert hub(forbidden, dry_run=True).acknowledge("sub", "delivery") is None
+
+
+@pytest.mark.parametrize(
+    "rows", [[], [{"id": "wanted", "updated_at": "v", "hub_at": "h", "deleted_at": None}]]
+)
+def test_read_row_uses_exact_identity_and_keeps_revision(hub, rows):
+    def handler(request):
+        body = json.loads(request.content)
+        assert body["where"] == {"id": "wanted"}
+        assert body["columns"] == ["id", "updated_at", "hub_at", "deleted_at"]
+        return httpx.Response(200, json={"rows": rows, "next_cursor": None})
+
+    assert hub(handler).read_row(
+        "records", "wanted", ["id", "updated_at", "hub_at", "deleted_at"]
+    ) == (rows[0] if rows else None)
+
+
+@pytest.mark.parametrize("rows", [[{"id": "wrong"}], [{"id": "wanted"}, {"id": "wanted"}]])
+def test_read_row_refuses_ambiguous_identity(hub, rows):
+    with pytest.raises(RuntimeError):
+        hub(lambda _: httpx.Response(200, json={"rows": rows, "next_cursor": None})).read_row(
+            "records", "wanted", ["id"]
+        )
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        {},
+        {"id": "wrong", "revision": {"updated_at": "v", "hub_at": "h"}},
+        {"id": "a", "revision": {"updated_at": "v"}},
+    ],
+)
+def test_patch_rejects_missing_or_wrong_commit_identity(hub, receipt):
+    with pytest.raises(RuntimeError):
+        hub(lambda _: httpx.Response(200, json=receipt)).patch_row(
+            "records", "a", {"label": "value"}, {"updated_at": "v", "hub_at": None}
+        )

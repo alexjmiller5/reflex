@@ -26,6 +26,7 @@ secrets = [modal.Secret.from_name(APP_NAME)]
 
 # High-water mark for the reconciler's "since" window, persisted across runs.
 state = modal.Dict.from_name(f"{APP_NAME}-state", create_if_missing=True)
+event_volume = modal.Volume.from_name(f"{APP_NAME}-events", create_if_missing=True)
 
 
 # Retries absorb transient Notion/hub 5xx blips (one 500 used to cost the whole
@@ -34,18 +35,61 @@ state = modal.Dict.from_name(f"{APP_NAME}-state", create_if_missing=True)
 @app.function(
     image=image,
     secrets=secrets,
-    schedule=modal.Cron("30 11 * * *"),
+    schedule=modal.Cron("* * * * *"),
+    volumes={"/state": event_volume},
+    max_containers=1,
     timeout=600,
     retries=modal.Retries(max_retries=2, initial_delay=60.0),
 )
-def daily():
-    """Recurring-task dispatch, then the compliance sweep over everything
-    edited since the last run (state carries the high-water mark so a
-    missed/failed webhook delivery still gets caught)."""
+def daily(seed: dict | None = None):
+    """Single serialized tick; daily work retains its 11:30 UTC due time.
+
+    The optional seed is an operator-supplied reconciled subscription baseline,
+    installed through this same serialized function before consumer activation.
+    """
     from datetime import datetime, timedelta, timezone
-    from zoneinfo import ZoneInfo
 
     from core.config import Settings
+    from core.event_state import locked_state
+    from core.hub import HubClient
+    from core.life_events import LifeEventConsumer, seed_projection
+    from core.tick import run_tick
+
+    s = Settings()
+    now = datetime.now(timezone.utc)
+    event_volume.reload()  # No open volume handles until after this call.
+    with locked_state("/state/events.json", commit=event_volume.commit) as journal:
+        hub = HubClient(s.life_hub_url, s.life_hub_token, dry_run=s.dry_run)
+        if seed is not None:
+            if s.dry_run or s.life_event_policy is None:
+                raise ValueError("seeding requires a configured, non-dry-run subscription")
+            status = hub.subscription_status(s.life_event_policy["subscription_id"])
+            if int(status["acked_seq"]) != int(seed["through_seq"]):
+                raise ValueError("seed checkpoint must equal the acknowledged subscription cursor")
+            seed_projection(
+                journal, s.life_event_policy, seed["tables"], through_seq=seed["through_seq"]
+            )
+            return {"seeded": True, "through_seq": seed["through_seq"]}
+
+        def consume():
+            if s.life_event_policy is not None:
+                result = LifeEventConsumer(hub, journal, s.life_event_policy).drain(
+                    now + timedelta(seconds=40)
+                )
+                print(result)
+                if result["incomplete"] and not s.dry_run:
+                    raise RuntimeError("event work remains pending; retained for next tick")
+
+        return run_tick(
+            journal, now, lambda: _daily(s, journal, now), consume=consume, dry_run=s.dry_run
+        )
+
+
+def _daily(s, journal, now):
+    """Recurring dispatch and remaining Notion compliance, once per due day."""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
     from core.dispatcher import dispatch
     from core.handlers import EVENT_DBS
     from core.hub import HubClient
@@ -53,9 +97,7 @@ def daily():
     from core.reconciler import reconcile
     from core.registry import CARD_COLUMNS, SPEC_COLUMNS, load_cards, load_recurring
 
-    s = Settings()
     notion = NotionClient(s.notion_api_token, dry_run=s.dry_run)
-    now = datetime.now(timezone.utc)
     today = now.astimezone(ZoneInfo("America/New_York")).date()
 
     hub = HubClient(s.life_hub_url, s.life_hub_token, dry_run=s.dry_run)
@@ -64,8 +106,13 @@ def daily():
     for line in dispatch(notion, today, recurring, cards, hub):
         print(line)
 
-    since = state.get("high_water") or (now - timedelta(days=1)).isoformat()
-    logs, mark = reconcile(notion, EVENT_DBS, since, now, place_tags=s.place_tags)
+    since = (
+        journal.get("high_water")
+        or state.get("high_water")
+        or (now - timedelta(days=1)).isoformat()
+    )
+    sources = EVENT_DBS - set(s.retired_notion_sources)
+    logs, mark = reconcile(notion, sources, since, now, place_tags=s.place_tags)
     for line in logs:
         print(line)
     if mark is None:
@@ -74,7 +121,18 @@ def daily():
         # rather than silently under-reporting compliance.
         raise RuntimeError("reconciler could not sweep every database - see SWEEP FAILED above")
     if not s.dry_run:
-        state["high_water"] = mark
+        journal["high_water"] = mark
+
+
+@app.local_entrypoint()
+def seed_events(seed_file: str):
+    """Install a private reconciled baseline via the serialized deployed worker."""
+    from pathlib import Path
+
+    seed = json.loads(Path(seed_file).read_text())
+    # Resolve the deployed function, not a second ephemeral writer deployment.
+    worker = modal.Function.from_name(APP_NAME, "daily")
+    print(worker.remote(seed=seed))
 
 
 # max_containers bounds the cost of a flood: signature checking happens in
@@ -106,6 +164,13 @@ async def notion_webhook(request: Request):
     # pinned against the docs 2026-08-20; "batched" in their docs means
     # multiple rapid edits get coalesced into fewer events upstream, not
     # multiple events per HTTP request).
-    logs = handle_event(payload, notion, now, notion.me(), place_tags=s.place_tags)
+    logs = handle_event(
+        payload,
+        notion,
+        now,
+        notion.me(),
+        place_tags=s.place_tags,
+        retired_sources=s.retired_notion_sources,
+    )
     print(logs)
     return {"ok": True, "handled": len(logs)}
