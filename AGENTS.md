@@ -49,6 +49,11 @@ and the specs-as-intent carry over as-is.
   unknown, not permission to backfill dates or creation defaults.
   Skip self-authored events only when every author is Reflex; aggregated
   events containing another author still need their property rules evaluated.
+* `rules.evaluate_transition` is the pure Life Data policy evaluator. Column
+  names, status values, defaults, excluded tags, timezone and optional day
+  boundary come from runtime policy. It uses event time, preserves supplied
+  values and explicit date edits, and never applies creation defaults to a
+  historical seed or an unrelated edit. The Notion evaluator remains separate.
 * Hub row scans exhaust bounded pages and retain tombstones for the caller
   to interpret. They are not frozen snapshots. Insert-only writes require
   stable caller-owned IDs and a complete inserted/existing receipt; a

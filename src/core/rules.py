@@ -150,3 +150,99 @@ def evaluate(data_source_id, page, now, created=False, place_tags=(), changed_pr
             viol(f"{slug}-date-reviewed-clear", {"Date Reviewed": {"date": None}})
 
     return out
+
+
+def evaluate_transition(before, after, changed, occurred_at, policy, created=False):
+    """Compute prospective fixes from runtime column/value policy.
+
+    Historical snapshots are seeds, not creation events. Explicit date edits
+    win over simultaneous status automation, and supplied creation values are
+    retained. The caller folds events in order and guards the eventual patch.
+    """
+    import copy
+    import json
+    from datetime import timedelta, timezone
+
+    if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+        raise ValueError("An aware event timestamp is required")
+    zone = ZoneInfo(policy.get("time_zone", "UTC"))
+    boundary = policy.get("day_start_minutes", 0)
+    if isinstance(boundary, bool) or not isinstance(boundary, int) or not 0 <= boundary <= 1439:
+        raise ValueError("day_start_minutes must be an integer from 0 through 1439")
+    stamp = (
+        occurred_at.astimezone(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+    effective, fixes = copy.deepcopy(after), {}
+
+    def missing(value):
+        return value is None or value == "" or value == []
+
+    def assign(column, value):
+        if effective.get(column) != value:
+            effective[column] = copy.deepcopy(value)
+            fixes[column] = copy.deepcopy(value)
+
+    def triggered(column):
+        return created or (column in changed and before.get(column) != after.get(column))
+
+    def tags_of(value):
+        if isinstance(value, str):
+            value = json.loads(value)
+        if value is None:
+            return []
+        if not isinstance(value, list) or any(not isinstance(tag, str) for tag in value):
+            raise ValueError("Tag values must be an array of strings")
+        return value
+
+    if created:
+        for column, default in policy.get("creation_defaults", {}).items():
+            existing = effective.get(column)
+            if isinstance(default, list):
+                existing = tags_of(existing)
+            if missing(existing):
+                assign(column, default)
+        if rule := policy.get("due_on_creation"):
+            if missing(effective.get(rule["column"])):
+                tags = tags_of(effective.get(rule.get("tags_column")))
+                if not set(tags) & set(rule.get("excluded_tags", [])):
+                    local = occurred_at.astimezone(zone)
+                    day = local.date()
+                    if local.hour * 60 + local.minute < boundary:
+                        day -= timedelta(days=1)
+                    assign(rule["column"], day.isoformat())
+        if rule := policy.get("creation_outcome"):
+            if effective.get(rule["column"]) in rule["replaceable"]:
+                desired = (
+                    rule["value"]
+                    if all(effective.get(k) == v for k, v in rule["when"].items())
+                    else rule["default"]
+                )
+                assign(rule["column"], desired)
+
+    for rule in policy.get("timestamps", []):
+        trigger, date = rule["trigger"], rule["date"]
+        if not triggered(trigger) or (date in changed and not created):
+            continue
+        if effective.get(trigger) in rule["set_on"] and missing(effective.get(date)):
+            assign(date, stamp)
+        elif (
+            effective.get(trigger) in rule["clear_on"]
+            and not missing(effective.get(date))
+            and not created
+        ):
+            assign(date, None)
+
+    for rule in policy.get("checkbox_timestamps", []):
+        trigger, date = rule["trigger"], rule["date"]
+        if not triggered(trigger) or (date in changed and not created):
+            continue
+        value = effective.get(trigger)
+        if value not in (None, 0, 1, False, True):
+            raise ValueError("Checkbox value must be boolean or numeric zero/one")
+        if value in (1, True) and missing(effective.get(date)):
+            assign(date, stamp)
+        elif value in (None, 0, False) and not missing(effective.get(date)) and not created:
+            assign(date, None)
+    return fixes
