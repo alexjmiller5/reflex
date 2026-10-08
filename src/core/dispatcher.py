@@ -9,10 +9,48 @@ from core.planner import keepalive_due, next_occurrence
 from core.registry import (
     KEEPALIVE_INACTIVE_DAYS,
     TASKS,
-    TRANSACTIONS,
     TaskTemplate,
     cc_keepalive_title,
 )
+
+
+def recent_card_activity(hub, cards, today):
+    """{account_id: True if the card has a transaction in the keepalive window}.
+
+    Finance lives in life-data: each card's account names its txns_<source>
+    table. Synthetic (opening-balance) and soft-deleted rows are not activity.
+    An unknown account fails the run - read as inactivity it would create
+    bogus tasks for every card.
+    """
+    if not cards:
+        return {}
+    sources = {
+        r["id"]: r["source"]
+        for r in hub.pull_rows("accounts", ("id", "source", "deleted_at"))
+        if not r.get("deleted_at")
+    }
+    missing = [c.account_id for c in cards if c.account_id not in sources]
+    if missing:
+        raise RuntimeError(
+            f"cc-keepalive: no live life-data accounts row for {missing} - "
+            f"fix account_id in the cc_keepalive_cards table"
+        )
+    cutoff = (today - timedelta(days=KEEPALIVE_INACTIVE_DAYS)).isoformat()
+    activity = {}
+    for card in cards:
+        rows = hub.pull_rows(
+            f"txns_{sources[card.account_id]}",
+            ("id", "account_id", "date", "synthetic", "deleted_at"),
+            where={"account_id": card.account_id},
+        )
+        activity[card.account_id] = any(
+            r["account_id"] == card.account_id
+            and not r.get("deleted_at")
+            and not r.get("synthetic")
+            and r["date"] >= cutoff
+            for r in rows
+        )
+    return activity
 
 
 def _hydrate_recipients(spec, hub):
@@ -122,35 +160,14 @@ def dispatch(notion, today, recurring, cards, hub, *, task_config=None, state=No
                     f"{spec.key}: life-data rejected the gift row for {person_id}: {rejected[0]}"
                 )
             log.append(f"{spec.key}: created gifts row for {person_id}")
-    # Fail hard (Modal emails on a failed schedule) if a Transactions-DB
-    # overhaul renames a card option - a filter on a gone option matches
-    # nothing, which would read as inactivity and create bogus tasks.
-    schema = notion.get_data_source(TRANSACTIONS)
-    options = {
-        o["name"] for o in schema["properties"]["Credit Card / Account"]["select"]["options"]
-    }
-    missing = [c for c in cards if c not in options]
-    if missing:
-        raise RuntimeError(
-            f"cc-keepalive: cards missing from Transactions DB 'Credit Card / Account' "
-            f"options: {missing} - update the cc_keepalive_cards table in life-data"
-        )
-    cutoff = (today - timedelta(days=KEEPALIVE_INACTIVE_DAYS)).isoformat()
-    for account in cards:
-        title = cc_keepalive_title(account)
+    activity = recent_card_activity(hub, cards, today)
+    for card in cards:
+        title = cc_keepalive_title(card.name)
         existing = notion.snapshots(TASKS, (title,))
-        has_recent_txn = notion.any_match(
-            TRANSACTIONS,
-            {
-                "and": [
-                    {"property": "Credit Card / Account", "select": {"equals": account}},
-                    {"property": "Transaction Date", "date": {"on_or_after": cutoff}},
-                ]
-            },
-        )
+        has_recent_txn = activity[card.account_id]
         if not keepalive_due(existing, has_recent_txn, today, KEEPALIVE_INACTIVE_DAYS):
-            log.append(f"cc-keepalive {account}: nothing to do")
+            log.append(f"cc-keepalive {card.account_id}: nothing to do")
             continue
         notion.create_page(TASKS, task_properties(title, today, ("Finances",), "Medium"))
-        log.append(f"cc-keepalive {account}: created task")
+        log.append(f"cc-keepalive {card.account_id}: created task")
     return log

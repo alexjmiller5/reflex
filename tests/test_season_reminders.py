@@ -1,4 +1,8 @@
-"""Complete inventories drive one retained reminder per watched season."""
+"""Complete inventories drive one retained reminder per watched season.
+
+A season is finished when every episode in it has aired and is watched: an
+announced or unscheduled episode holds the reminder until it airs and is
+watched, so a weekly-drop season never fires after its first batch."""
 
 import copy
 from datetime import date
@@ -16,14 +20,9 @@ CONFIG = {
         "show_column": "series_id",
         "season_column": "season",
         "number_column": "number",
+        "air_date_column": "aired",
         "status_column": "status",
         "finished_value": "Watched",
-    },
-    "seasons": {
-        "table": "season_totals",
-        "show_column": "series_id",
-        "season_column": "season",
-        "total_column": "total",
     },
     "title_prefixes": ["Example Show"],
     "title_template": "Read discussion for {title}, season {season}",
@@ -41,10 +40,6 @@ class Hub:
             "series": [
                 {"id": "show-a", "name": "Example Show", "deleted_at": None},
                 {"id": "show-b", "name": "Example Show: Regional", "deleted_at": None},
-            ],
-            "season_totals": [
-                {"id": "season-a", "series_id": "show-a", "season": 1, "total": 1},
-                {"id": "season-b", "series_id": "show-b", "season": 1, "total": 1},
             ],
             "episodes": [],
             "work_items": [],
@@ -68,19 +63,20 @@ class Hub:
         }
 
 
-def episode(key, number=1, status="Open", season=1, show="show-a"):
+def episode(key, number=1, status="Open", season=1, show="show-a", aired="2029-12-01"):
     return {
         "id": key,
         "series_id": show,
         "season": season,
         "number": number,
+        "aired": aired,
         "status": status,
         "deleted_at": None,
     }
 
 
-def run(hub, state, config=CONFIG):
-    return dispatch_seasons(hub, state, config, TASKS, TODAY)
+def run(hub, state, config=CONFIG, today=TODAY):
+    return dispatch_seasons(hub, state, config, TASKS, today)
 
 
 def test_baseline_does_not_flood_old_finished_seasons():
@@ -113,7 +109,6 @@ def test_new_completion_includes_regional_editions_and_ignores_specials():
 
 def test_partial_season_gap_and_unwatched_episode_do_not_complete():
     hub = Hub()
-    hub.tables["season_totals"][0]["total"] = 3
     state = {}
     run(hub, state)
     hub.tables["episodes"] = [
@@ -202,40 +197,80 @@ def test_duplicate_episode_number_fails_before_baseline():
     assert state == {} and hub.writes == []
 
 
-def test_short_released_inventory_waits_for_declared_season_total():
+def test_announced_episode_holds_the_season_until_it_airs_and_is_watched():
+    # weekly drop: the first batch is watched, the finale is announced
     hub = Hub()
-    hub.tables["episodes"] = [episode("a")]
-    hub.tables["season_totals"] = [
-        {"id": "season-a", "series_id": "show-a", "season": 1, "total": 2}
-    ]
-    config = {
-        **CONFIG,
-        "seasons": {
-            "table": "season_totals",
-            "show_column": "series_id",
-            "season_column": "season",
-            "total_column": "total",
-        },
-    }
+    hub.tables["episodes"] = [episode("a"), episode("b", number=2, aired="2030-01-09")]
     state = {}
-    run(hub, state, config)
+    run(hub, state)
     hub.tables["episodes"][0]["status"] = "Watched"
-    run(hub, state, config)
+    run(hub, state)
+    run(hub, state, today=date(2030, 1, 9))
     assert hub.writes == []
-    hub.tables["episodes"].append(episode("b", number=2, status="Watched"))
-    run(hub, state, config)
+    hub.tables["episodes"][1]["status"] = "Watched"
+    run(hub, state, today=date(2030, 1, 9))
+    assert len(hub.writes) == 1
+    assert hub.tables["work_items"][0]["due"] == "2030-01-09"
+
+
+def test_watched_but_unaired_episode_still_holds_the_season():
+    # every AIRED episode is watched, but one is dated after today
+    hub = Hub()
+    hub.tables["episodes"] = [episode("a"), episode("b", number=2, aired="2030-01-09")]
+    state = {}
+    run(hub, state)
+    for row in hub.tables["episodes"]:
+        row["status"] = "Watched"
+    run(hub, state)
+    assert hub.writes == []
+    run(hub, state, today=date(2030, 1, 9))
     assert len(hub.writes) == 1
 
 
-def test_missing_total_never_infers_finished_season():
+def test_unscheduled_episode_never_infers_finished_season():
     hub = Hub()
-    hub.tables["season_totals"] = []
-    hub.tables["episodes"] = [episode("a")]
+    hub.tables["episodes"] = [episode("a"), episode("b", number=2, aired=None)]
     state = {}
     run(hub, state)
     hub.tables["episodes"][0]["status"] = "Watched"
     run(hub, state)
     assert hub.writes == []
+
+
+def test_title_prefix_ignores_case():
+    hub = Hub()
+    hub.tables["series"].append(
+        {"id": "show-c", "name": "example show: Denmark", "deleted_at": None}
+    )
+    hub.tables["episodes"] = [episode("c", show="show-c")]
+    state = {}
+    run(hub, state)
+    hub.tables["episodes"][0]["status"] = "Watched"
+    run(hub, state)
+    assert [r["title"] for r in hub.tables["work_items"]] == [
+        "Read discussion for example show: Denmark, season 1"
+    ]
+
+
+def test_unrelated_show_is_ignored():
+    hub = Hub()
+    hub.tables["series"].append({"id": "show-z", "name": "Other Show", "deleted_at": None})
+    hub.tables["episodes"] = [episode("z", show="show-z")]
+    state = {}
+    run(hub, state)
+    hub.tables["episodes"][0]["status"] = "Watched"
+    run(hub, state)
+    assert hub.writes == []
+
+
+def test_staged_config_waits_for_the_tasks_binding():
+    # the config can ship before the Tasks cutover; nothing is read or saved
+    hub = Mock()
+    state = {}
+    assert dispatch_seasons(hub, state, CONFIG, None, TODAY) == [
+        "season reminders: staged until LIFE_TASKS_CONFIG selects the Life Data Tasks binding"
+    ]
+    assert state == {} and not hub.mock_calls
 
 
 def test_failed_task_inventory_prevents_baseline():

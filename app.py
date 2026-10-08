@@ -111,8 +111,7 @@ def _daily(s, journal, now):
     if s.life_season_reminders_config is not None:
         from core.season_reminders import dispatch_seasons
 
-        if s.life_tasks_config is None:
-            raise ValueError("season reminders require the Life Data Tasks binding")
+        # Stays staged (logs only) until LIFE_TASKS_CONFIG selects the Tasks binding.
         for line in dispatch_seasons(
             hub, journal, s.life_season_reminders_config, s.life_tasks_config, today
         ):

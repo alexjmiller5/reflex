@@ -14,7 +14,6 @@ from datetime import date
 TASKS = "77ef5074-aa23-468a-b5fb-2692e78184db"
 PROJECTS = "30703953-a8af-8041-94b9-000b187b5b36"
 SYNAPSE = "2b103953-a8af-8062-971a-000b0e200122"
-TRANSACTIONS = "34603953-a8af-806e-bd83-000b5b921780"
 
 KEEPALIVE_INACTIVE_DAYS = 365
 
@@ -43,6 +42,12 @@ class RecurringSpec:
     gift_recipients: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class KeepaliveCard:
+    name: str  # display name, shown in the task title
+    account_id: str  # life-data accounts.id; its txns_<source> rows are the activity
+
+
 def cc_keepalive_title(account):
     return (
         f"My {account} card has no transactions in the past year (per my Transactions "
@@ -62,7 +67,7 @@ SPEC_COLUMNS = (
     "gift_recipients",
     "deleted_at",
 )
-CARD_COLUMNS = ("name", "deleted_at")
+CARD_COLUMNS = ("name", "account_id", "deleted_at")
 
 
 def load_recurring(rows) -> tuple[RecurringSpec, ...]:
@@ -98,6 +103,14 @@ def load_recurring(rows) -> tuple[RecurringSpec, ...]:
     return tuple(specs)
 
 
-def load_cards(rows) -> tuple[str, ...]:
-    """life-data `cc_keepalive_cards` rows -> card option names."""
-    return tuple(r["name"] for r in rows if not r.get("deleted_at"))
+def load_cards(rows) -> tuple[KeepaliveCard, ...]:
+    """life-data `cc_keepalive_cards` rows -> cards; a live row without an
+    account_id fails the run rather than dropping out of the keepalive."""
+    cards = []
+    for r in rows:
+        if r.get("deleted_at"):
+            continue
+        if not r.get("account_id"):
+            raise ValueError(f"cc_keepalive_cards row {r['name']!r} has no account_id")
+        cards.append(KeepaliveCard(r["name"], r["account_id"]))
+    return tuple(cards)

@@ -5,10 +5,25 @@ import pytest
 
 from core.dispatcher import _hydrate_recipients, dispatch
 from core.planner import TaskSnapshot
-from core.registry import TASKS, RecurringSpec, TaskTemplate, cc_keepalive_title
+from core.registry import TASKS, KeepaliveCard, RecurringSpec, TaskTemplate, cc_keepalive_title
 
 RECIPIENTS = ("r1", "r2", "r3", "r4", "r5")
-CARDS = ("Card A", "Card B")
+CARDS = (KeepaliveCard("Card A", "acct-a"), KeepaliveCard("Card B", "acct-b"))
+ACCOUNTS = [
+    {"id": "acct-a", "source": "bank", "deleted_at": None},
+    {"id": "acct-b", "source": "bank", "deleted_at": None},
+]
+
+
+def txn(account, day, **extra):
+    return {
+        "id": f"{account}-{day}",
+        "account_id": account,
+        "date": day,
+        "synthetic": None,
+        "deleted_at": None,
+    } | extra
+
 
 # Recipient names live in life-data, not the repo, so the fake hub serves the
 # people rows and records the gift rows it is asked to push.
@@ -19,12 +34,25 @@ FAKE_PEOPLE = [
 
 
 class FakeHub:
-    def __init__(self, reject=None):
-        self.pushed, self.reject = [], reject
+    """Serves people for the gift generator and the life-data finance tables
+    (accounts + txns_<source>) the keepalive reads; every card is active
+    unless a test replaces `txns`."""
 
-    def pull_rows(self, table, columns):
-        assert table == "people"
-        return FAKE_PEOPLE
+    def __init__(self, reject=None, txns=None):
+        self.pushed, self.reject = [], reject
+        self.txns = (
+            txns if txns is not None else [txn("acct-a", "2026-08-01"), txn("acct-b", "2026-08-01")]
+        )
+        self.pulls = []
+
+    def pull_rows(self, table, columns, *, since="", where=None):
+        self.pulls.append((table, where))
+        if table == "people":
+            return FAKE_PEOPLE
+        if table == "accounts":
+            return ACCOUNTS
+        assert table == "txns_bank" and set(where) == {"account_id"}
+        return [r for r in self.txns if r["account_id"] == where["account_id"]]
 
     def push_rows(self, table, rows):
         self.pushed.append((table, rows[0]))
@@ -52,27 +80,15 @@ SPECS = (PLANTS, CHRISTMAS)
 
 
 class FakeNotion:
-    def __init__(self, snaps=None, inactive_accounts=()):
-        self._snaps = snaps or {}
-        self._inactive = inactive_accounts
-        self.card_options = CARDS
-        self.created = []
+    """Tasks only: card activity comes from life-data, so this fake has no
+    query or schema methods - a Notion Transactions read would raise."""
 
-    def get_data_source(self, ds):
-        return {
-            "properties": {
-                "Credit Card / Account": {
-                    "select": {"options": [{"name": n} for n in self.card_options]}
-                }
-            }
-        }
+    def __init__(self, snaps=None):
+        self._snaps = snaps or {}
+        self.created = []
 
     def snapshots(self, ds, titles):
         return self._snaps.get(titles, [])
-
-    def any_match(self, ds, filter):
-        account = filter["and"][0]["select"]["equals"]
-        return account not in self._inactive
 
     def create_page(self, ds, properties, icon=None):
         self.created.append((ds, properties))
@@ -153,9 +169,19 @@ def test_hydration_builds_the_brainstorm_then_buy_pairs():
     assert spec.match_titles == tuple(t.title for t in spec.templates)
 
 
+def keepalive_titles(fake):
+    return [
+        p["Name"]["title"][0]["text"]["content"]
+        for _, p in fake.created
+        if "no transactions in the past year" in p["Name"]["title"][0]["text"]["content"]
+    ]
+
+
 def test_keepalive_creates_task_for_inactive_card_only():
-    fake = FakeNotion(inactive_accounts=("Card B",))
-    dispatch(fake, date(2026, 8, 25), SPECS, CARDS, FakeHub())
+    # Card B's last life-data transaction is older than a year
+    fake = FakeNotion()
+    hub = FakeHub(txns=[txn("acct-a", "2026-08-01"), txn("acct-b", "2025-08-24")])
+    dispatch(fake, date(2026, 8, 25), SPECS, CARDS, hub)
     keepalive = [
         (ds, p)
         for ds, p in fake.created
@@ -169,24 +195,73 @@ def test_keepalive_creates_task_for_inactive_card_only():
     assert p["Tags"]["multi_select"] == [{"name": "Finances"}]
 
 
+def test_keepalive_reads_each_card_from_its_accounts_source_table():
+    hub = FakeHub()
+    dispatch(FakeNotion(), date(2026, 8, 25), (), CARDS, hub)
+    assert ("accounts", None) in hub.pulls
+    assert ("txns_bank", {"account_id": "acct-a"}) in hub.pulls
+    assert ("txns_bank", {"account_id": "acct-b"}) in hub.pulls
+
+
+def test_keepalive_counts_a_transaction_exactly_one_year_old():
+    hub = FakeHub(txns=[txn("acct-a", "2025-08-25"), txn("acct-b", "2025-08-25")])
+    fake = FakeNotion()
+    dispatch(fake, date(2026, 8, 25), (), CARDS, hub)
+    assert keepalive_titles(fake) == []
+
+
+def test_keepalive_ignores_synthetic_deleted_and_other_account_rows():
+    # an opening-balance row, a soft-deleted row and a row the hub returned
+    # for a different account are not activity on Card A
+    hub = FakeHub(
+        txns=[
+            txn("acct-a", "2026-08-01", synthetic=1),
+            txn("acct-a", "2026-08-02", deleted_at="2026-08-03T00:00:00.000Z"),
+            txn("acct-b", "2026-08-01"),
+        ]
+    )
+    original = hub.pull_rows
+
+    def leaky(table, columns, *, since="", where=None):
+        rows = original(table, columns, since=since, where=where)
+        return rows + [txn("acct-b", "2026-08-04")] if table == "txns_bank" else rows
+
+    hub.pull_rows = leaky
+    fake = FakeNotion()
+    dispatch(fake, date(2026, 8, 25), (), CARDS, hub)
+    assert keepalive_titles(fake) == [cc_keepalive_title("Card A")]
+
+
+def test_keepalive_card_with_no_transactions_is_inactive():
+    hub = FakeHub(txns=[txn("acct-a", "2026-08-01")])
+    fake = FakeNotion()
+    dispatch(fake, date(2026, 8, 25), (), CARDS, hub)
+    assert keepalive_titles(fake) == [cc_keepalive_title("Card B")]
+
+
 def test_keepalive_open_task_suppresses():
     title = cc_keepalive_title("Card B")
-    fake = FakeNotion(
-        snaps={(title,): [TaskSnapshot(title, "To Do", date(2026, 8, 1), None)]},
-        inactive_accounts=("Card B",),
-    )
-    dispatch(fake, date(2026, 8, 25), SPECS, CARDS, FakeHub())
+    fake = FakeNotion(snaps={(title,): [TaskSnapshot(title, "To Do", date(2026, 8, 1), None)]})
+    hub = FakeHub(txns=[txn("acct-a", "2026-08-01")])
+    dispatch(fake, date(2026, 8, 25), SPECS, CARDS, hub)
     titles = [p["Name"]["title"][0]["text"]["content"] for _, p in fake.created]
     assert title not in titles
 
 
-def test_keepalive_fails_hard_on_unknown_card_option():
-    # a Transactions-DB overhaul that renames a card option must fail the run
-    # (Modal emails on schedule failure), never silently create bogus tasks
+def test_keepalive_fails_hard_on_unknown_account():
+    # a card pointing at an account that no longer exists must fail the run
+    # (Modal emails on schedule failure), never read as inactivity
+    cards = (*CARDS, KeepaliveCard("Card C", "acct-gone"))
     fake = FakeNotion()
-    fake.card_options = ("Card A",)  # Card B missing
-    with pytest.raises(RuntimeError, match="Card B"):
-        dispatch(fake, date(2026, 8, 25), SPECS, CARDS, FakeHub())
+    with pytest.raises(RuntimeError, match="acct-gone"):
+        dispatch(fake, date(2026, 8, 25), (), cards, FakeHub())
+    assert fake.created == []
+
+
+def test_no_cards_reads_no_finance_tables():
+    hub = FakeHub()
+    dispatch(FakeNotion(), date(2026, 8, 25), (), (), hub)
+    assert hub.pulls == []
 
 
 def test_hydration_names_the_recipient_id_missing_from_life_data():

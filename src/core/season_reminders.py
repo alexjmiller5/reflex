@@ -1,7 +1,9 @@
 """Prospective season reminders from complete, caller-selected inventories.
 
-The inventory must contain the whole season, not only currently aired episodes.
-Keep this optional consumer disabled until that source contract is established.
+A season is finished when every episode the source lists for it has aired
+(air date on or before today) and is watched, numbered 1..n without gaps. An
+announced or unscheduled episode holds the reminder, so a season released in
+weekly batches never fires after its first batch.
 """
 
 import copy
@@ -21,8 +23,23 @@ def _inventory(hub, binding, columns):
     return result
 
 
+def _watched(row, episodes, today):
+    """Live, aired on or before today (an unscheduled episode has not aired), watched."""
+    aired = row.get(episodes["air_date_column"])
+    return (
+        not row.get("deleted_at")
+        and aired is not None
+        and aired <= today.isoformat()
+        and row.get(episodes["status_column"]) == episodes["finished_value"]
+    )
+
+
 def dispatch_seasons(hub, state, config, task_config, today):
     """Freeze one occurrence before insertion; preserve every existing target."""
+    if task_config is None:
+        return [
+            "season reminders: staged until LIFE_TASKS_CONFIG selects the Life Data Tasks binding"
+        ]
     shows, episodes = config["shows"], config["episodes"]
     columns = task_config["columns"]
     prefixes = config["title_prefixes"]
@@ -43,31 +60,26 @@ def dispatch_seasons(hub, state, config, task_config, today):
     episode_rows = _inventory(
         hub,
         episodes,
-        [episodes[k] for k in ("show_column", "season_column", "number_column", "status_column")],
+        [
+            episodes[k]
+            for k in (
+                "show_column",
+                "season_column",
+                "number_column",
+                "air_date_column",
+                "status_column",
+            )
+        ],
     )
-    seasons = config["seasons"]
-    season_rows = _inventory(
-        hub, seasons, [seasons[k] for k in ("show_column", "season_column", "total_column")]
-    )
-    totals = {}
-    for row in season_rows.values():
-        if row.get("deleted_at"):
-            continue
-        season, total = row.get(seasons["season_column"]), row.get(seasons["total_column"])
-        if type(season) is not int or season < 1 or type(total) is not int or total < 1:
-            raise ValueError("season totals require positive integers")
-        key = json.dumps([row[seasons["show_column"]], season], separators=(",", ":"))
-        if key in totals:
-            raise ValueError("duplicate season total")
-        totals[key] = total
     tasks = _inventory(hub, task_config, columns.values())
+    folded = tuple(p.casefold() for p in prefixes)
     selected = {}
     for key, row in show_rows.items():
         title = row.get(shows["title_column"])
         if (
             not row.get("deleted_at")
             and isinstance(title, str)
-            and title.startswith(tuple(prefixes))
+            and title.casefold().startswith(folded)
         ):
             selected[key] = title
     groups = {}
@@ -93,13 +105,8 @@ def dispatch_seasons(hub, state, config, task_config, today):
         current = {r["id"] for r in group.values()}
         complete = (
             known <= current
-            and key in totals
-            and sorted(group) == list(range(1, totals[key] + 1))
-            and all(
-                not r.get("deleted_at")
-                and r.get(episodes["status_column"]) == episodes["finished_value"]
-                for r in group.values()
-            )
+            and sorted(group) == list(range(1, len(group) + 1))
+            and all(_watched(r, episodes, today) for r in group.values())
         )
         records["known"][key] = sorted(known | current)
         if complete and key not in records["plans"]:

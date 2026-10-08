@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 
-from core.registry import cc_keepalive_title, load_cards, load_recurring
+from core.registry import KeepaliveCard, cc_keepalive_title, load_cards, load_recurring
 
 
 def row(**overrides):
@@ -106,10 +106,17 @@ def test_templateless_spec_without_recipients_fails_loudly():
 
 def test_load_cards_skips_deleted():
     rows = [
-        {"name": "Card A", "deleted_at": None},
-        {"name": "Card B", "deleted_at": "2026-09-02T00:00:00"},
+        {"name": "Card A", "account_id": "acct-a", "deleted_at": None},
+        {"name": "Card B", "account_id": "acct-b", "deleted_at": "2026-09-02T00:00:00"},
     ]
-    assert load_cards(rows) == ("Card A",)
+    assert load_cards(rows) == (KeepaliveCard("Card A", "acct-a"),)
+
+
+def test_load_cards_requires_an_account_id():
+    # without the accounts ref there is no transaction table to read, and a
+    # silent skip would hide the card from the keepalive forever
+    with pytest.raises(ValueError, match="Card A"):
+        load_cards([{"name": "Card A", "account_id": None, "deleted_at": None}])
 
 
 def test_cc_keepalive_title_names_card():

@@ -13,7 +13,6 @@ from zoneinfo import ZoneInfo
 from core.planner import TaskSnapshot, keepalive_due, next_occurrence
 from core.registry import (
     KEEPALIVE_INACTIVE_DAYS,
-    TRANSACTIONS,
     RecurringSpec,
     TaskTemplate,
     cc_keepalive_title,
@@ -232,17 +231,14 @@ def dispatch_life(notion, today, recurring, cards, hub, state, config):
 
 
 def _keepalive(notion, today, cards, hub, state, config, snapshot):
-    schema = notion.get_data_source(TRANSACTIONS)
-    options = {
-        o["name"] for o in schema["properties"]["Credit Card / Account"]["select"]["options"]
-    }
-    if any(account not in options or account not in config["card_keys"] for account in cards):
-        raise ValueError("keepalive requires a current transaction option and stable card key")
+    from core.dispatcher import recent_card_activity
+
+    activity = recent_card_activity(hub, cards, today)
     columns, zone = config["columns"], ZoneInfo(config["time_zone"])
     log = []
-    for account in cards:
-        key = "keepalive:" + config["card_keys"][account]
-        title = cc_keepalive_title(account)
+    for card in cards:
+        key = "keepalive:" + card.account_id
+        title = cc_keepalive_title(card.name)
         records = state.get("recurrence:" + key, {"plans": {}})
         known = {item["row"]["id"] for plan in records["plans"].values() for item in plan["items"]}
         existing = [
@@ -255,17 +251,7 @@ def _keepalive(notion, today, cards, hub, state, config, snapshot):
             for row in snapshot.values()
             if row["id"] in known or row.get(columns["title"]) == title
         ]
-        cutoff = (today - timedelta(days=KEEPALIVE_INACTIVE_DAYS)).isoformat()
-        recent = notion.any_match(
-            TRANSACTIONS,
-            {
-                "and": [
-                    {"property": "Credit Card / Account", "select": {"equals": account}},
-                    {"property": "Transaction Date", "date": {"on_or_after": cutoff}},
-                ]
-            },
-        )
-        if not keepalive_due(existing, recent, today, KEEPALIVE_INACTIVE_DAYS):
+        if not keepalive_due(existing, activity[card.account_id], today, KEEPALIVE_INACTIVE_DAYS):
             continue
         defaults = config["keepalive_defaults"]
         template = TaskTemplate(

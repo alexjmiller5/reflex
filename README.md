@@ -153,29 +153,30 @@ bindings add their own table/columns, defaults, description/date templates and
 optional task links to the same retained occurrence. Failed gift creation is
 recoverable even after all related tasks were created.
 
-Card keepalive checks still read the existing Notion Transactions source. Their
-task output uses the selected Life Data binding, stable runtime `card_keys` and
-`keepalive_defaults`; migrating Tasks does not silently change the financial
-activity reader. An absent task binding preserves the existing Notion writer.
+Card keepalive tasks use the selected Life Data binding and `keepalive_defaults`;
+each card's occurrence identity is its `account_id`. An absent task binding
+preserves the existing Notion writer.
 
 ## Season-completion reminders
 
 `LIFE_SEASON_REMINDERS_CONFIG` optionally adds prospective reminders to the
-existing daily dispatch. It requires `LIFE_TASKS_CONFIG`; neither setting is
-enabled by deployment alone. Supply these runtime bindings:
+existing daily dispatch. It acts only once `LIFE_TASKS_CONFIG` selects the Life
+Data Tasks binding; until then the daily run logs that it is staged and reads
+nothing. Supply these runtime bindings:
 
 - `shows`: `table`, `title_column`.
 - `episodes`: `table`, `show_column`, `season_column`, `number_column`,
-  `status_column`, `finished_value`.
-- `seasons`: `table`, `show_column`, `season_column`, `total_column`.
-  Totals must describe the entire season, including unreleased episodes.
-- `title_prefixes`: selected edition title prefixes.
+  `air_date_column`, `status_column`, `finished_value`.
+- `title_prefixes`: selected show title prefixes, matched ignoring case.
 - `title_template`: template with `{title}` and `{season}` placeholders.
 - `task_values`: initial values keyed by actual task column names. These cannot
   override identity, title or due date; task bindings supply the latter columns.
 
-Positive seasons require exactly episodes 1 through the declared total, all
-watched and live. Specials are excluded. Missing totals do not mean finished.
+A positive season is finished when it has episodes 1 through n with no gaps and
+every one of them is live, has aired (air date on or before today) and is
+watched. An announced or unscheduled episode holds the reminder, so a season
+released in weekly batches does not fire after its first batch. Specials
+(season 0) are excluded.
 The initial scan retains already-completed seasons without creating reminders;
 review that baseline before activation. Later completions create one stable
 occurrence per show ID and season. Frozen intent survives ambiguous responses,

@@ -239,35 +239,45 @@ def test_gift_retry_finishes_gifts_after_all_tasks_already_exist():
     assert gift["people"] == ["person-1"] and gift["day"] == "2026-12-25"
 
 
-def test_keepalive_retains_notion_transaction_reader_but_creates_life_task():
-    from core.registry import TRANSACTIONS
+class FinanceHub(Hub):
+    """Task rows plus the life-data finance tables the keepalive reads."""
 
-    class Notion:
-        def get_data_source(self, source):
-            assert source == TRANSACTIONS
-            return {
-                "properties": {
-                    "Credit Card / Account": {"select": {"options": [{"name": "Card A"}]}}
-                }
-            }
+    def __init__(self, txns):
+        super().__init__()
+        self.txns = txns
 
-        def any_match(self, source, filters):
-            assert source == TRANSACTIONS
-            return False
+    def pull_rows(self, table, columns, *, since="", where=None):
+        if table == "accounts":
+            return [{"id": "acct-1", "source": "bank", "deleted_at": None}]
+        if table == "txns_bank":
+            return [r for r in self.txns if r["account_id"] == where["account_id"]]
+        return super().pull_rows(table, columns)
 
-        def create_page(self, *args):
-            pytest.fail("no Notion task writes after selected cutover")
 
-    hub, state = Hub(), {}
-    config = {
-        **CONFIG,
-        "card_keys": {"Card A": "card-1"},
-        "keepalive_defaults": {"tags": ["Finance"], "priority": "Medium"},
-    }
+def test_keepalive_reads_life_finance_and_creates_life_task():
+    from core.registry import KeepaliveCard
+
+    hub, state = FinanceHub([{"id": "t1", "account_id": "acct-1", "date": "2024-12-31"}]), {}
+    config = {**CONFIG, "keepalive_defaults": {"tags": ["Finance"], "priority": "Medium"}}
+    card = KeepaliveCard("Card A", "acct-1")
     for _ in range(2):
-        dispatch_life(Notion(), date(2026, 1, 1), (), ("Card A",), hub, state, config)
+        # notion=None: neither a Notion Transactions read nor a Notion task write
+        dispatch_life(None, date(2026, 1, 1), (), (card,), hub, state, config)
     assert len(hub.rows) == 1
-    assert next(iter(hub.rows.values()))["tags"] == ["Finance"]
+    row = next(iter(hub.rows.values()))
+    assert row["tags"] == ["Finance"] and row["label"].startswith("My Card A card")
+    assert "recurrence:keepalive:acct-1" in state
+
+
+def test_keepalive_recent_life_transaction_creates_nothing():
+    from core.registry import KeepaliveCard
+
+    hub, state = FinanceHub([{"id": "t1", "account_id": "acct-1", "date": "2025-06-01"}]), {}
+    config = {**CONFIG, "keepalive_defaults": {"tags": ["Finance"], "priority": "Medium"}}
+    dispatch_life(
+        None, date(2026, 1, 1), (), (KeepaliveCard("Card A", "acct-1"),), hub, state, config
+    )
+    assert hub.rows == {}
 
 
 def test_dispatch_selection_never_calls_notion_task_writer():

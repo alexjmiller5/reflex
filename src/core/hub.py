@@ -141,7 +141,3 @@ class HubClient:
             return {"upserted": 0, "rejected": []}
         columns = sorted({k for r in rows for k in r})
         return self._post("/v1/rows/push", {"table": table, "columns": columns, "rows": rows})
-
-
-def pull_rows(url: str, token: str, table: str, columns) -> list[dict]:
-    return HubClient(url, token).pull_rows(table, columns)
