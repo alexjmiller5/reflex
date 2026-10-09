@@ -9,7 +9,7 @@ weekly batches never fires after its first batch.
 import copy
 import json
 
-from core.life_dispatch import _identity, _write_plan
+from core.soma_dispatch import _identity, _write_plan
 
 
 def _inventory(hub, binding, columns):
@@ -37,9 +37,7 @@ def _watched(row, episodes, today):
 def dispatch_seasons(hub, state, config, task_config, today):
     """Freeze one occurrence before insertion; preserve every existing target."""
     if task_config is None:
-        return [
-            "season reminders: staged until LIFE_TASKS_CONFIG selects the Life Data Tasks binding"
-        ]
+        return ["season reminders: staged until SOMA_TASKS_CONFIG selects the Soma Tasks binding"]
     shows, episodes = config["shows"], config["episodes"]
     columns = task_config["columns"]
     prefixes = config["title_prefixes"]

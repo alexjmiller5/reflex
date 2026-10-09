@@ -268,7 +268,7 @@ def test_staged_config_waits_for_the_tasks_binding():
     hub = Mock()
     state = {}
     assert dispatch_seasons(hub, state, CONFIG, None, TODAY) == [
-        "season reminders: staged until LIFE_TASKS_CONFIG selects the Life Data Tasks binding"
+        "season reminders: staged until SOMA_TASKS_CONFIG selects the Soma Tasks binding"
     ]
     assert state == {} and not hub.mock_calls
 

@@ -56,7 +56,7 @@ def seed_projection(state, policy, tables, *, through_seq):
     }
 
 
-class LifeEventConsumer:
+class SomaEventConsumer:
     def __init__(self, hub, state, policy, *, now=None):
         self.hub, self.state, self.policy = hub, state, policy
         self.subscription = policy["subscription_id"]

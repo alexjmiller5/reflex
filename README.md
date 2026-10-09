@@ -11,9 +11,9 @@ as code.
 ```
 app.py                 Modal shim - image, secrets, endpoints, schedule
 src/core/               business logic (plain Python, portable)
-src/core/registry.py   Notion ids + spec model/loaders (spec DATA lives in life-data)
+src/core/registry.py   Notion ids + spec model/loaders (spec DATA lives in soma)
 src/core/notion.py     Notion API client
-src/core/hub.py        life-data hub client - pulls the spec tables at run time
+src/core/hub.py        soma hub client - pulls the spec tables at run time
 scripts/run_local.py   dry-run the dispatch logic with no Modal at all
 tests/                  pytest
 .env.tpl                secrets manifest (1Password op:// refs, committed)
@@ -78,17 +78,17 @@ backfill tasks.
   infra (ephemeral container, not the deployed schedule) and performs real
   writes to Notion.
 
-## Life Data workflow events
+## Soma workflow events
 
 The scheduled `daily` function is a serialized one-minute tick. Recurring dispatch
 and the remaining Notion compliance sweep still become due at 11:30 UTC and run
 once per due day. Failed ticks do not advance the durable success marker. The
 existing schedule slot is reused.
 
-`LIFE_EVENT_POLICY` is optional JSON runtime configuration containing a
+`SOMA_EVENT_POLICY` is optional JSON runtime configuration containing a
 `subscription_id` and `tables` object. Each table policy names its columns,
 transition values, creation defaults, timezone and optional day boundary. No
-policy means no Life Data event writes. `NOTION_RETIRED_SOURCES` is an explicit
+policy means no Soma event writes. `NOTION_RETIRED_SOURCES` is an explicit
 comma-separated list of migrated Notion data source IDs; it disables their old
 webhook rules and compliance sweeps without disabling unrelated sources.
 
@@ -137,7 +137,7 @@ unconditional write.
 
 ### Recurring task writer
 
-`LIFE_TASKS_CONFIG` independently selects the Life Data task adapter. It contains
+`SOMA_TASKS_CONFIG` independently selects the Soma task adapter. It contains
 `table`, `time_zone`, semantic-to-catalog `columns` (title, status, due, completed,
 tags, priority, notes, links, blocked_by), creation `defaults`, and optional
 `adoptions`. Each recurring template has a stable `key` separate from its title.
@@ -153,14 +153,14 @@ bindings add their own table/columns, defaults, description/date templates and
 optional task links to the same retained occurrence. Failed gift creation is
 recoverable even after all related tasks were created.
 
-Card keepalive tasks use the selected Life Data binding and `keepalive_defaults`;
+Card keepalive tasks use the selected Soma binding and `keepalive_defaults`;
 each card's occurrence identity is its `account_id`. An absent task binding
 preserves the existing Notion writer.
 
 ## Season-completion reminders
 
-`LIFE_SEASON_REMINDERS_CONFIG` optionally adds prospective reminders to the
-existing daily dispatch. It acts only once `LIFE_TASKS_CONFIG` selects the Life
+`SOMA_SEASON_REMINDERS_CONFIG` optionally adds prospective reminders to the
+existing daily dispatch. It acts only once `SOMA_TASKS_CONFIG` selects the Soma
 Data Tasks binding; until then the daily run logs that it is staged and reads
 nothing. Supply these runtime bindings:
 

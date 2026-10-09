@@ -25,7 +25,7 @@ def txn(account, day, **extra):
     } | extra
 
 
-# Recipient names live in life-data, not the repo, so the fake hub serves the
+# Recipient names live in soma, not the repo, so the fake hub serves the
 # people rows and records the gift rows it is asked to push.
 FAKE_PEOPLE = [
     {"id": pid, "name": f"Person{i} Surname", "deleted_at": None}
@@ -34,7 +34,7 @@ FAKE_PEOPLE = [
 
 
 class FakeHub:
-    """Serves people for the gift generator and the life-data finance tables
+    """Serves people for the gift generator and the soma finance tables
     (accounts + txns_<source>) the keepalive reads; every card is active
     unless a test replaces `txns`."""
 
@@ -80,7 +80,7 @@ SPECS = (PLANTS, CHRISTMAS)
 
 
 class FakeNotion:
-    """Tasks only: card activity comes from life-data, so this fake has no
+    """Tasks only: card activity comes from soma, so this fake has no
     query or schema methods - a Notion Transactions read would raise."""
 
     def __init__(self, snaps=None):
@@ -178,7 +178,7 @@ def keepalive_titles(fake):
 
 
 def test_keepalive_creates_task_for_inactive_card_only():
-    # Card B's last life-data transaction is older than a year
+    # Card B's last soma transaction is older than a year
     fake = FakeNotion()
     hub = FakeHub(txns=[txn("acct-a", "2026-08-01"), txn("acct-b", "2025-08-24")])
     dispatch(fake, date(2026, 8, 25), SPECS, CARDS, hub)
@@ -264,7 +264,7 @@ def test_no_cards_reads_no_finance_tables():
     assert hub.pulls == []
 
 
-def test_hydration_names_the_recipient_id_missing_from_life_data():
+def test_hydration_names_the_recipient_id_missing_from_soma():
     # a gift_recipients id that no people row matches (wrong id format, a
     # hard-deleted person) used to surface as a bare KeyError that killed
     # the whole daily run - it has to say which id and which table to fix

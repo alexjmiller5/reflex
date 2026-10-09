@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from core.life_events import LifeEventConsumer, seed_projection
+from core.soma_events import SomaEventConsumer, seed_projection
 
 NOW = datetime(2026, 1, 2, tzinfo=timezone.utc)
 DEADLINE = NOW + timedelta(minutes=1)
@@ -151,7 +151,7 @@ def setup():
 
 
 def drain(hub, state):
-    return LifeEventConsumer(hub, state, POLICY, now=lambda: NOW).drain(DEADLINE)
+    return SomaEventConsumer(hub, state, POLICY, now=lambda: NOW).drain(DEADLINE)
 
 
 def test_event_is_persisted_before_ack_and_fix_uses_event_time():
@@ -306,7 +306,7 @@ def test_dry_run_has_no_ack_patch_or_local_commit():
 def test_deadline_with_unfolded_events_reports_incomplete():
     hub, state = setup()
     hub.change({"state": "Done"}, "2026-01-01T01:00:00.000Z")
-    result = LifeEventConsumer(hub, state, POLICY, now=lambda: DEADLINE).drain(DEADLINE)
+    result = SomaEventConsumer(hub, state, POLICY, now=lambda: DEADLINE).drain(DEADLINE)
     assert result["incomplete"] and result["pending"] == 0
     assert not hub.acks and not hub.patches
 

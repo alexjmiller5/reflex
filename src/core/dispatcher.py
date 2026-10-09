@@ -17,7 +17,7 @@ from core.registry import (
 def recent_card_activity(hub, cards, today):
     """{account_id: True if the card has a transaction in the keepalive window}.
 
-    Finance lives in life-data: each card's account names its txns_<source>
+    Finance lives in soma: each card's account names its txns_<source>
     table. Synthetic (opening-balance) and soft-deleted rows are not activity.
     An unknown account fails the run - read as inactivity it would create
     bogus tasks for every card.
@@ -32,7 +32,7 @@ def recent_card_activity(hub, cards, today):
     missing = [c.account_id for c in cards if c.account_id not in sources]
     if missing:
         raise RuntimeError(
-            f"cc-keepalive: no live life-data accounts row for {missing} - "
+            f"cc-keepalive: no live soma accounts row for {missing} - "
             f"fix account_id in the cc_keepalive_cards table"
         )
     cutoff = (today - timedelta(days=KEEPALIVE_INACTIVE_DAYS)).isoformat()
@@ -57,7 +57,7 @@ def _hydrate_recipients(spec, hub):
     """Build the Christmas templates from live people rows.
 
     People's names are personal data and are not stored in this repo - the
-    spec row holds people ids, so the names come from the life-data `people`
+    spec row holds people ids, so the names come from the soma `people`
     table at run time. Returns the spec with templates/match_titles filled in,
     plus each recipient's full name for the gift row.
     """
@@ -70,7 +70,7 @@ def _hydrate_recipients(spec, hub):
     for person_id in spec.gift_recipients:
         if person_id not in names:
             raise RuntimeError(
-                f"{spec.key}: no live life-data people row for recipient id {person_id} - "
+                f"{spec.key}: no live soma people row for recipient id {person_id} - "
                 f"fix gift_recipients on the recurring_specs row (people ids are dashless)"
             )
         full = names[person_id]
@@ -103,13 +103,13 @@ def _hydrate_recipients(spec, hub):
 
 
 def dispatch(notion, today, recurring, cards, hub, *, task_config=None, state=None):
-    """recurring/cards come from the life-data tables (see registry loaders);
+    """recurring/cards come from the soma tables (see registry loaders);
     `hub` (core.hub.HubClient) reads people and writes gift rows."""
     if task_config is not None:
-        from core.life_dispatch import dispatch_life
+        from core.soma_dispatch import dispatch_life
 
         if state is None:
-            raise ValueError("Life Data task dispatch requires a durable journal")
+            raise ValueError("Soma task dispatch requires a durable journal")
         return dispatch_life(notion, today, recurring, cards, hub, state, task_config)
     log = []
     for spec in recurring:
@@ -157,7 +157,7 @@ def dispatch(notion, today, recurring, cards, hub, *, task_config=None, state=No
             rejected = hub.push_rows("gifts", [row]).get("rejected") or []
             if rejected:
                 raise RuntimeError(
-                    f"{spec.key}: life-data rejected the gift row for {person_id}: {rejected[0]}"
+                    f"{spec.key}: soma rejected the gift row for {person_id}: {rejected[0]}"
                 )
             log.append(f"{spec.key}: created gifts row for {person_id}")
     activity = recent_card_activity(hub, cards, today)

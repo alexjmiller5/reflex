@@ -52,28 +52,28 @@ def daily(seed: dict | None = None):
     from core.config import Settings
     from core.event_state import locked_state
     from core.hub import HubClient
-    from core.life_events import LifeEventConsumer, seed_projection
+    from core.soma_events import SomaEventConsumer, seed_projection
     from core.tick import run_tick
 
     s = Settings()
     now = datetime.now(timezone.utc)
     event_volume.reload()  # No open volume handles until after this call.
     with locked_state("/state/events.json", commit=event_volume.commit) as journal:
-        hub = HubClient(s.life_hub_url, s.life_hub_token, dry_run=s.dry_run)
+        hub = HubClient(s.soma_hub_url, s.soma_hub_token, dry_run=s.dry_run)
         if seed is not None:
-            if s.dry_run or s.life_event_policy is None:
+            if s.dry_run or s.soma_event_policy is None:
                 raise ValueError("seeding requires a configured, non-dry-run subscription")
-            status = hub.subscription_status(s.life_event_policy["subscription_id"])
+            status = hub.subscription_status(s.soma_event_policy["subscription_id"])
             if int(status["acked_seq"]) != int(seed["through_seq"]):
                 raise ValueError("seed checkpoint must equal the acknowledged subscription cursor")
             seed_projection(
-                journal, s.life_event_policy, seed["tables"], through_seq=seed["through_seq"]
+                journal, s.soma_event_policy, seed["tables"], through_seq=seed["through_seq"]
             )
             return {"seeded": True, "through_seq": seed["through_seq"]}
 
         def consume():
-            if s.life_event_policy is not None:
-                result = LifeEventConsumer(hub, journal, s.life_event_policy).drain(
+            if s.soma_event_policy is not None:
+                result = SomaEventConsumer(hub, journal, s.soma_event_policy).drain(
                     now + timedelta(seconds=40)
                 )
                 print(result)
@@ -100,20 +100,20 @@ def _daily(s, journal, now):
     notion = NotionClient(s.notion_api_token, dry_run=s.dry_run)
     today = now.astimezone(ZoneInfo("America/New_York")).date()
 
-    hub = HubClient(s.life_hub_url, s.life_hub_token, dry_run=s.dry_run)
+    hub = HubClient(s.soma_hub_url, s.soma_hub_token, dry_run=s.dry_run)
     recurring = load_recurring(hub.pull_rows("recurring_specs", SPEC_COLUMNS))
     cards = load_cards(hub.pull_rows("cc_keepalive_cards", CARD_COLUMNS))
     for line in dispatch(
-        notion, today, recurring, cards, hub, task_config=s.life_tasks_config, state=journal
+        notion, today, recurring, cards, hub, task_config=s.soma_tasks_config, state=journal
     ):
         print(line)
 
-    if s.life_season_reminders_config is not None:
+    if s.soma_season_reminders_config is not None:
         from core.season_reminders import dispatch_seasons
 
-        # Stays staged (logs only) until LIFE_TASKS_CONFIG selects the Tasks binding.
+        # Stays staged (logs only) until SOMA_TASKS_CONFIG selects the Tasks binding.
         for line in dispatch_seasons(
-            hub, journal, s.life_season_reminders_config, s.life_tasks_config, today
+            hub, journal, s.soma_season_reminders_config, s.soma_tasks_config, today
         ):
             print(line)
 

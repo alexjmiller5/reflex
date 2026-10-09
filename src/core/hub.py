@@ -1,4 +1,4 @@
-"""life-data hub client - the only module besides notion.py that does network I/O.
+"""soma hub client - the only module besides notion.py that does network I/O.
 
 Pulls the automation catalog rows (recurring specs, keepalive cards) and the
 people names the Christmas generator needs; pushes the gift rows it creates.

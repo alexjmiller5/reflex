@@ -1,4 +1,4 @@
-"""load_recurring/load_cards: life-data rows in, validated specs out."""
+"""load_recurring/load_cards: soma rows in, validated specs out."""
 
 import json
 from datetime import date

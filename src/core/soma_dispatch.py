@@ -97,7 +97,7 @@ def dispatch_life(notion, today, recurring, cards, hub, state, config):
             spec, full_names = _hydrate_recipients(spec, hub)
         templates = {template.key: template for template in spec.templates}
         if "" in templates or len(templates) != len(spec.templates):
-            raise ValueError("Life Data recurring templates require unique stable keys")
+            raise ValueError("Soma recurring templates require unique stable keys")
         state_key = "recurrence:" + spec.key
         records = copy.deepcopy(state.get(state_key, {"plans": {}}))
         # Finish interrupted work before planning another occurrence or reading

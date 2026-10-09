@@ -24,7 +24,7 @@ from core.season_reminders import dispatch_seasons
 def main() -> None:
     s = Settings()
     notion = NotionClient(s.notion_api_token, dry_run=s.dry_run)
-    hub = HubClient(s.life_hub_url, s.life_hub_token, dry_run=s.dry_run)
+    hub = HubClient(s.soma_hub_url, s.soma_hub_token, dry_run=s.dry_run)
     now = datetime.now(timezone.utc)
     today = now.astimezone(ZoneInfo("America/New_York")).date()
     journal = {}  # throwaway: the deployed journal lives on the Modal Volume
@@ -32,12 +32,12 @@ def main() -> None:
     recurring = load_recurring(hub.pull_rows("recurring_specs", SPEC_COLUMNS))
     cards = load_cards(hub.pull_rows("cc_keepalive_cards", CARD_COLUMNS))
     for line in dispatch(
-        notion, today, recurring, cards, hub, task_config=s.life_tasks_config, state=journal
+        notion, today, recurring, cards, hub, task_config=s.soma_tasks_config, state=journal
     ):
         print(line)
-    if s.life_season_reminders_config is not None:
+    if s.soma_season_reminders_config is not None:
         for line in dispatch_seasons(
-            hub, journal, s.life_season_reminders_config, s.life_tasks_config, today
+            hub, journal, s.soma_season_reminders_config, s.soma_tasks_config, today
         ):
             print(line)
 

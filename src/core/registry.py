@@ -1,8 +1,8 @@
 """Data-source ids + the recurring-spec model and row loaders.
 
-The specs themselves are DATA, not code: they live in the life-data tables
+The specs themselves are DATA, not code: they live in the soma tables
 `recurring_specs` and `cc_keepalive_cards` (one row per spec/card, edited via
-`life sql`, served by the hub) and are loaded at dispatch time. Disabling a
+`soma sql`, served by the hub) and are loaded at dispatch time. Disabling a
 spec = soft-deleting its row (`SET deleted_at = updated_at`); re-enabling =
 clearing `deleted_at`. This file only ships the shape and validation.
 """
@@ -27,7 +27,7 @@ class TaskTemplate:
     links: str = ""
     notes: str = ""
     blocked_by_prev: bool = False
-    key: str = ""  # stable template identity required by the Life Data writer
+    key: str = ""  # stable template identity required by the Soma writer
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ class RecurringSpec:
 @dataclass(frozen=True)
 class KeepaliveCard:
     name: str  # display name, shown in the task title
-    account_id: str  # life-data accounts.id; its txns_<source> rows are the activity
+    account_id: str  # soma accounts.id; its txns_<source> rows are the activity
 
 
 def cc_keepalive_title(account):
@@ -71,7 +71,7 @@ CARD_COLUMNS = ("name", "account_id", "deleted_at")
 
 
 def load_recurring(rows) -> tuple[RecurringSpec, ...]:
-    """life-data `recurring_specs` rows -> validated specs.
+    """soma `recurring_specs` rows -> validated specs.
 
     Raises on any malformed row so the daily run fails loudly (Modal emails
     on a failed schedule) instead of silently skipping an automation.
@@ -104,7 +104,7 @@ def load_recurring(rows) -> tuple[RecurringSpec, ...]:
 
 
 def load_cards(rows) -> tuple[KeepaliveCard, ...]:
-    """life-data `cc_keepalive_cards` rows -> cards; a live row without an
+    """soma `cc_keepalive_cards` rows -> cards; a live row without an
     account_id fails the run rather than dropping out of the keepalive."""
     cards = []
     for r in rows:

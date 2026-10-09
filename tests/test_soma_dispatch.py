@@ -5,7 +5,7 @@ from datetime import date
 import httpx
 import pytest
 
-from core.life_dispatch import dispatch_life
+from core.soma_dispatch import dispatch_life
 from core.registry import RecurringSpec, TaskTemplate
 
 CONFIG = {
@@ -240,7 +240,7 @@ def test_gift_retry_finishes_gifts_after_all_tasks_already_exist():
 
 
 class FinanceHub(Hub):
-    """Task rows plus the life-data finance tables the keepalive reads."""
+    """Task rows plus the soma finance tables the keepalive reads."""
 
     def __init__(self, txns):
         super().__init__()

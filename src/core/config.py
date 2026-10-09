@@ -9,23 +9,23 @@ from datetime import datetime, timezone
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
-from core.life_events import _columns
+from core.soma_events import _columns
 from core.rules import evaluate_transition
 
 
 class Settings(BaseSettings):
     notion_api_token: str
     notion_webhook_secret: str = ""  # empty until subscription created
-    life_hub_url: str  # life-data hub serving the recurring_specs/cc_keepalive_cards tables
-    life_hub_token: str
+    soma_hub_url: str  # soma hub serving the recurring_specs/cc_keepalive_cards tables
+    soma_hub_token: str
     notion_tasks_place_tags: str = ""  # comma-separated Tags exempt from the default due date
     dry_run: bool = False
-    life_event_policy: dict | None = None
-    life_tasks_config: dict | None = None
-    life_season_reminders_config: dict | None = None
+    soma_event_policy: dict | None = None
+    soma_tasks_config: dict | None = None
+    soma_season_reminders_config: dict | None = None
     notion_retired_sources: str = ""
 
-    @field_validator("life_event_policy")
+    @field_validator("soma_event_policy")
     @classmethod
     def validate_event_policy(cls, policy):
         if policy is None:
