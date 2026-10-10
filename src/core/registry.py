@@ -99,6 +99,11 @@ def load_recurring(rows) -> tuple[RecurringSpec, ...]:
         )
         if not valid:
             raise ValueError(f"invalid recurring_specs row {spec.key!r}")
+        keys = [t.key for t in spec.templates]
+        if "" in keys or len(set(keys)) != len(keys):
+            raise ValueError(
+                f"recurring_specs row {spec.key!r} needs a unique stable key per template"
+            )
         specs.append(spec)
     return tuple(specs)
 

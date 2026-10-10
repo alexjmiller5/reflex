@@ -19,6 +19,7 @@ def row(**overrides):
         "templates": json.dumps(
             [
                 {
+                    "key": "water",
                     "title": "Water the office plants",
                     "tags": ["Chore"],
                     "priority": "High",
@@ -71,6 +72,7 @@ def test_blocked_by_prev_and_offset_survive():
                 templates=json.dumps(
                     [
                         {
+                            "key": "buy",
                             "title": "Buy it",
                             "tags": ["Gifts"],
                             "priority": "High",
@@ -122,3 +124,24 @@ def test_load_cards_requires_an_account_id():
 def test_cc_keepalive_title_names_card():
     t = cc_keepalive_title("Card A")
     assert "Card A" in t and "$5" in t
+
+
+def test_templates_need_unique_stable_keys():
+    def keyed(key):
+        template = {"title": "Water the office plants", "tags": ["Chore"], "priority": "High"}
+        return row(templates=json.dumps([template | ({"key": key} if key is not None else {})]))
+
+    (spec,) = load_recurring([keyed("water")])
+    assert spec.templates[0].key == "water"
+    with pytest.raises(ValueError, match="water-plants.*key"):
+        load_recurring([keyed(None)])  # legacy row without template keys
+    with pytest.raises(ValueError, match="water-plants.*key"):
+        load_recurring([keyed("")])
+    duplicate = json.dumps(
+        [
+            {"title": "A", "tags": ["Chore"], "priority": "High", "key": "same"},
+            {"title": "B", "tags": ["Chore"], "priority": "High", "key": "same"},
+        ]
+    )
+    with pytest.raises(ValueError, match="water-plants.*key"):
+        load_recurring([row(templates=duplicate)])

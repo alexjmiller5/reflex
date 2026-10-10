@@ -30,7 +30,10 @@ and the specs-as-intent carry over as-is.
   Changing a chore's cadence, title,
   or cards = `soma sql UPDATE ...` - no commit, no deploy. Disable a spec by
   soft-deleting its row (`SET deleted_at = updated_at`); re-enable by
-  clearing it. `registry.py` ships only the Notion data-source ids, the
+  clearing it. Every template in a spec's `templates` JSON carries a `key`,
+  unique within the spec and never renamed: it is the template's identity in
+  retained plans and adoptions, so the loader rejects a spec whose templates
+  lack one. `registry.py` ships only the Notion data-source ids, the
   dataclasses, and the row loaders. Personal spec content (chores, finances,
   people) must NEVER be committed to this repo - that's why it moved out.
 * The `DRY_RUN` env var (`Settings.dry_run`) gates all Notion and hub writes -
