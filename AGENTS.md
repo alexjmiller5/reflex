@@ -53,7 +53,9 @@ and the specs-as-intent carry over as-is.
   until a minute before the next tick. A message naming a watched table
   drains; a drain with nothing for Reflex is one subscription status read
   (hub capabilities are checked once per tick). Every (re)connect drains, and
-  retained work or a down socket drains every 60 s instead.
+  retained work or a down socket drains every 60 s instead. A backlog is not
+  a failure: it defers daily work (which reads what drains stamp), and
+  `tick.note_backlog` fails the run only after 30 minutes of pending work.
 * Daily reads go through `table_mirror.TableMirror`, Reflex's copy of each
   table it reads in `/state/tables.json` on the same volume, kept current by
   soma's vendored table-pull helper (`table_pull.py`, copied verbatim from

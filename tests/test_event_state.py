@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from core.event_state import locked_state
-from core.tick import run_tick
+from core.tick import note_backlog, run_tick
 
 
 def test_state_survives_reopen_and_flush_precedes_return(tmp_path):
@@ -93,3 +93,26 @@ def test_dry_run_never_advances_daily_success():
     calls = []
     run_tick(state, at(2, 12), lambda: calls.append("preview"), dry_run=True)
     assert calls == ["preview"] and state == {}
+
+
+def test_event_backlog_defers_daily_without_failing_the_tick():
+    state = {"daily_success": "2026-01-01"}
+    calls = []
+    assert run_tick(state, at(2, 12), lambda: calls.append("daily"), consume=lambda: True) == {
+        "daily": False
+    }
+    assert calls == [] and state["daily_success"] == "2026-01-01"
+    run_tick(state, at(2, 12, 10), lambda: calls.append("daily"), consume=lambda: False)
+    assert calls == ["daily"] and state["daily_success"] == "2026-01-02"
+
+
+def test_backlog_fails_only_after_staying_pending_for_half_an_hour():
+    state = {}
+    note_backlog(state, True, at(2, 12, 9))
+    note_backlog(state, True, at(2, 12, 29))
+    note_backlog(state, False, at(2, 12, 39))  # drained: the clock restarts
+    assert "backlog_since" not in state
+    note_backlog(state, True, at(2, 12, 49))
+    note_backlog(state, True, at(2, 13, 9))
+    with pytest.raises(RuntimeError, match="pending since"):
+        note_backlog(state, True, at(2, 13, 19))

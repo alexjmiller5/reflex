@@ -82,7 +82,10 @@ backfill tasks.
 
 The scheduled `daily` function is a serialized ten-minute tick. Recurring dispatch
 and the remaining Notion compliance sweep still become due at 11:30 UTC and run
-once per due day. Failed ticks do not advance the durable success marker. The
+once per due day. Failed ticks do not advance the durable success marker. A
+burst of event work that a drain cannot finish is retained, not a failure: daily
+work waits for a settled drain and the wake listener keeps draining. The tick
+fails, and Modal alerts, only once event work has stayed pending for 30 minutes. The
 existing schedule slot is reused. Between ticks Reflex listens on the hub's wake
 socket and drains the subscription when a commit touches a watched table, so
 events apply within seconds while a quiet hour costs about two dozen hub

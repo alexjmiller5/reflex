@@ -55,7 +55,7 @@ def daily(seed: dict | None = None):
     from core.event_state import locked_state
     from core.hub import HubClient
     from core.soma_events import SomaEventConsumer, listen, seed_projection
-    from core.tick import run_tick
+    from core.tick import note_backlog, run_tick
 
     s = Settings()
     now = datetime.now(timezone.utc)
@@ -76,15 +76,16 @@ def daily(seed: dict | None = None):
         consumer = None
         if s.soma_event_policy is not None:
             consumer = SomaEventConsumer(hub, journal, s.soma_event_policy)
+        latest = None
 
-        def settled(result):
+        def report(result):
+            nonlocal latest
             print(result)
-            if result["incomplete"] and not s.dry_run:
-                raise RuntimeError("event work remains pending; retained for next tick")
+            latest = result
+            return result["incomplete"] and not s.dry_run
 
         def consume():
-            if consumer is not None:
-                settled(consumer.drain(now + timedelta(seconds=40)))
+            return consumer is not None and report(consumer.drain(now + timedelta(seconds=40)))
 
         result = run_tick(
             journal, now, lambda: _daily(s, journal, now), consume=consume, dry_run=s.dry_run
@@ -100,7 +101,11 @@ def daily(seed: dict | None = None):
                 consumer, hub.changes_socket, until, now=lambda: datetime.now(timezone.utc)
             )
             if last is not None:
-                settled(last)
+                report(last)
+            if not s.dry_run:
+                # A burst the drains could not finish waits for the next tick;
+                # only work still pending after half an hour fails the run.
+                note_backlog(journal, latest["incomplete"], datetime.now(timezone.utc))
         print(f"tick: {hub.requests} hub requests")
         return result
 
