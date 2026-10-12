@@ -1,4 +1,5 @@
 import json
+import re
 from contextlib import ExitStack
 
 import httpx
@@ -112,7 +113,7 @@ def test_insert_retry_reports_existing_without_upserting(hub):
     def handler(request):
         assert request.url.path == "/v1/rows/insert"
         body = json.loads(request.content)
-        assert body["columns"] == ["id", "label"]
+        assert body["columns"] == ["id", "label", "updated_at"]
         row = body["rows"][0]
         if row["id"] in stored:
             return httpx.Response(
@@ -128,6 +129,43 @@ def test_insert_retry_reports_existing_without_upserting(hub):
     result = client.insert_rows("records", [{"id": "stable", "label": "created"}])
     assert result == {"inserted": [], "existing": ["stable"], "rejected": []}
     assert stored["stable"]["label"] == "human edit"
+
+
+def test_insert_stamps_the_edit_timestamp_the_hub_requires(hub):
+    sent = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        sent.append(body)
+        return httpx.Response(
+            200, json={"inserted": [r["id"] for r in body["rows"]], "existing": [], "rejected": []}
+        )
+
+    rows = [{"id": "a", "label": "new"}, {"id": "b", "updated_at": "2026-01-01T00:00:00.000Z"}]
+    hub(handler).insert_rows("records", rows)
+    stamped, kept = sent[0]["rows"]
+    assert "updated_at" in sent[0]["columns"]
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", stamped["updated_at"])
+    assert kept["updated_at"] == "2026-01-01T00:00:00.000Z"
+    assert "updated_at" not in rows[0]  # the caller's frozen intent is untouched
+
+
+def test_insert_rejection_names_the_rule_without_row_values(hub):
+    rejection = {
+        "id": "row-7",
+        "col": "updated_at",
+        "rule": "required",
+        "message": "updated_at must be a valid UTC millisecond timestamp.",
+    }
+    receipt = {"inserted": [], "existing": [], "rejected": [rejection]}
+    with pytest.raises(RuntimeError) as err:
+        hub(lambda _: httpx.Response(200, json=receipt)).insert_rows(
+            "records", [{"id": "row-7", "label": "private text"}]
+        )
+    text = str(err.value)
+    for part in rejection.values():
+        assert part in text
+    assert "private text" not in text
 
 
 @pytest.mark.parametrize(

@@ -103,7 +103,9 @@ and the specs-as-intent carry over as-is.
 * Hub row scans exhaust bounded pages and retain tombstones for the caller
   to interpret. They are not frozen snapshots. Insert-only writes require
   stable caller-owned IDs and a complete inserted/existing receipt; a
-  partial rejection fails the operation. Conditional patches carry both
+  partial rejection fails the operation, naming each rejected id/col/rule.
+  The hub requires `updated_at` on inserted rows, so `insert_rows` stamps it
+  at send time; frozen plans never carry one. Conditional patches carry both
   `updated_at` and `hub_at`. A conflict requires rereading and recomputing,
   never falling back to an unconditional push. Dry-run inserts and patches
   return no committed receipt. The optional Soma consumer is

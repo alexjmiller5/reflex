@@ -5,6 +5,8 @@ people names the Christmas generator needs; pushes the gift rows it creates.
 Opens the hub's wake socket for the subscription consumer.
 """
 
+from datetime import datetime, timezone
+
 import httpx
 from urllib.parse import quote
 
@@ -110,12 +112,19 @@ class HubClient:
         if self.dry_run:
             print(f"DRY RUN insert {len(rows)} rows into {table}")
             return None
+        # The hub requires an edit timestamp on every inserted row; stamp it at
+        # send time so a retried frozen plan never carries a stale one.
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        rows = [{"updated_at": now, **row} for row in rows]
         columns = sorted({k for row in rows for k in row})
         out = self._post("/v1/rows/insert", {"table": table, "columns": columns, "rows": rows})
         if not all(isinstance(out.get(key), list) for key in ("inserted", "existing", "rejected")):
             raise RuntimeError("hub returned an invalid insert receipt")
         if out["rejected"]:
-            raise RuntimeError(f"hub rejected {len(out['rejected'])} rows from {table}")
+            # Rejections name id/col/rule and catalog terms, never free-text values.
+            raise RuntimeError(
+                f"hub rejected {len(out['rejected'])} rows from {table}: {out['rejected']}"
+            )
         accepted = out["inserted"] + out["existing"]
         expected = [row["id"] for row in rows]
         if (
