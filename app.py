@@ -23,6 +23,7 @@ image = (
 )
 
 secrets = [modal.Secret.from_name(APP_NAME)]
+TICK_MINUTES = 10  # between them the tick listens on the hub's wake socket
 
 # High-water mark for the reconciler's "since" window, persisted across runs.
 state = modal.Dict.from_name(f"{APP_NAME}-state", create_if_missing=True)
@@ -35,14 +36,15 @@ event_volume = modal.Volume.from_name(f"{APP_NAME}-events", create_if_missing=Tr
 @app.function(
     image=image,
     secrets=secrets,
-    schedule=modal.Cron("* * * * *"),
+    schedule=modal.Cron(f"*/{TICK_MINUTES} * * * *"),
     volumes={"/state": event_volume},
     max_containers=1,
-    timeout=600,
+    timeout=900,
     retries=modal.Retries(max_retries=2, initial_delay=60.0),
 )
 def daily(seed: dict | None = None):
-    """Single serialized tick; daily work retains its 11:30 UTC due time.
+    """Single serialized tick: drain, daily work when due (11:30 UTC), then
+    listen on the hub's wake socket until just before the next tick.
 
     The optional seed is an operator-supplied reconciled subscription baseline,
     installed through this same serialized function before consumer activation.
@@ -52,7 +54,7 @@ def daily(seed: dict | None = None):
     from core.config import Settings
     from core.event_state import locked_state
     from core.hub import HubClient
-    from core.soma_events import SomaEventConsumer, seed_projection
+    from core.soma_events import SomaEventConsumer, listen, seed_projection
     from core.tick import run_tick
 
     s = Settings()
@@ -71,18 +73,36 @@ def daily(seed: dict | None = None):
             )
             return {"seeded": True, "through_seq": seed["through_seq"]}
 
-        def consume():
-            if s.soma_event_policy is not None:
-                result = SomaEventConsumer(hub, journal, s.soma_event_policy).drain(
-                    now + timedelta(seconds=40)
-                )
-                print(result)
-                if result["incomplete"] and not s.dry_run:
-                    raise RuntimeError("event work remains pending; retained for next tick")
+        consumer = None
+        if s.soma_event_policy is not None:
+            consumer = SomaEventConsumer(hub, journal, s.soma_event_policy)
 
-        return run_tick(
+        def settled(result):
+            print(result)
+            if result["incomplete"] and not s.dry_run:
+                raise RuntimeError("event work remains pending; retained for next tick")
+
+        def consume():
+            if consumer is not None:
+                settled(consumer.drain(now + timedelta(seconds=40)))
+
+        result = run_tick(
             journal, now, lambda: _daily(s, journal, now), consume=consume, dry_run=s.dry_run
         )
+        if consumer is not None:
+            # Stops a minute before the next tick, so a last drain (up to 40 s)
+            # never overlaps it, even across a redeploy. That tick's first drain
+            # covers the gap.
+            until = now.replace(second=0, microsecond=0) + timedelta(
+                minutes=TICK_MINUTES - now.minute % TICK_MINUTES, seconds=-60
+            )
+            last = listen(
+                consumer, hub.changes_socket, until, now=lambda: datetime.now(timezone.utc)
+            )
+            if last is not None:
+                settled(last)
+        print(f"tick: {hub.requests} hub requests")
+        return result
 
 
 def _daily(s, journal, now):
@@ -96,11 +116,15 @@ def _daily(s, journal, now):
     from core.notion import NotionClient
     from core.reconciler import reconcile
     from core.registry import CARD_COLUMNS, SPEC_COLUMNS, load_cards, load_recurring
+    from core.table_mirror import TableMirror
 
     notion = NotionClient(s.notion_api_token, dry_run=s.dry_run)
     today = now.astimezone(ZoneInfo("America/New_York")).date()
 
     hub = HubClient(s.soma_hub_url, s.soma_hub_token, dry_run=s.dry_run)
+    # Every hub read below comes from the mirror: one cursor request when quiet.
+    hub = TableMirror(hub, "/state/tables.json", today=today, commit=event_volume.commit)
+    hub.refresh()
     recurring = load_recurring(hub.pull_rows("recurring_specs", SPEC_COLUMNS))
     cards = load_cards(hub.pull_rows("cc_keepalive_cards", CARD_COLUMNS))
     for line in dispatch(
@@ -116,6 +140,8 @@ def _daily(s, journal, now):
             hub, journal, s.soma_season_reminders_config, s.soma_tasks_config, today
         ):
             print(line)
+    hub.save()
+    print(f"daily reads: {hub.requests} hub requests")
 
     since = (
         journal.get("high_water")

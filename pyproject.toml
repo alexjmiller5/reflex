@@ -7,6 +7,7 @@ dependencies = [
     "httpx>=0.28",
     "pydantic-settings>=2.7",
     "fastapi>=0.115",
+    "websockets>=17.2",
 ]
 
 [dependency-groups]

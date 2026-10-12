@@ -1,12 +1,15 @@
 """Synthetic durable-delivery model exercises the public subscription contract."""
 
 import copy
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 
-from core.soma_events import SomaEventConsumer, seed_projection
+from websockets.exceptions import ConnectionClosedError
+
+from core.soma_events import RETRY_SECONDS, SomaEventConsumer, listen, seed_projection
 
 NOW = datetime(2026, 1, 2, tzinfo=timezone.utc)
 DEADLINE = NOW + timedelta(minutes=1)
@@ -363,3 +366,141 @@ def test_subscription_must_watch_exact_policy_fields_and_lifecycle(mutation):
     with pytest.raises(ValueError, match="sources"):
         drain(hub, state)
     assert hub.pending is None and not hub.acks and not hub.patches
+
+
+def test_a_quiet_drain_after_the_first_is_one_status_request():
+    hub, state = setup()
+    calls = []
+    for name in ("session", "subscription_status", "poll_events"):
+        method = getattr(hub, name)
+        setattr(hub, name, lambda *a, _m=method, _n=name: calls.append(_n) or _m(*a))
+    consumer = SomaEventConsumer(hub, state, POLICY, now=lambda: NOW)
+    consumer.drain(DEADLINE)
+    assert calls == ["session", "subscription_status"]
+    calls.clear()
+    consumer.drain(DEADLINE)
+    assert calls == ["subscription_status"]
+    calls.clear()
+    hub.change({"state": "Done"}, "2026-01-01T01:00:00.000Z")
+    consumer.drain(DEADLINE)
+    assert hub.rows["r"]["finished"] == "2026-01-01T01:00:00.000Z"
+    # One poll per batch: the user's change, then the consumer's own patch.
+    assert calls.count("poll_events") == 2
+
+
+class Clock:
+    def __init__(self):
+        self.t = NOW
+
+    def now(self):
+        return self.t
+
+    def sleep(self, seconds):
+        self.t += timedelta(seconds=seconds)
+
+
+class Socket:
+    """Scripted wake socket: (seconds, message) arrivals, then "drop" or silence."""
+
+    def __init__(self, clock, script):
+        self.clock, self.script = clock, list(script)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def recv(self, timeout):
+        if self.script and self.script[0] == "drop":
+            self.script.pop(0)
+            raise ConnectionClosedError(None, None)
+        if self.script and self.script[0][0] <= timeout:
+            seconds, message = self.script.pop(0)
+            self.clock.sleep(seconds)
+            return message
+        if self.script:
+            self.script[0] = (self.script[0][0] - timeout, self.script[0][1])
+        self.clock.sleep(timeout)
+        raise TimeoutError
+
+
+class Consumer:
+    policy = POLICY
+
+    def __init__(self, clock, incomplete=()):
+        self.clock, self.at, self.incomplete = clock, [], list(incomplete)
+
+    def drain(self, deadline):
+        self.at.append(int((self.clock.now() - NOW).total_seconds()))
+        return {"incomplete": bool(self.incomplete and self.incomplete.pop(0))}
+
+
+def wake(*tables):
+    return json.dumps({"seq": 7, "tables": list(tables)})
+
+
+def listen_for(clock, consumer, sockets, minutes=10):
+    queue = list(sockets)
+
+    def connect():
+        item = queue.pop(0) if queue else Socket(clock, [])
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    until = NOW + timedelta(minutes=minutes)
+    return listen(consumer, connect, until, now=clock.now, sleep=clock.sleep)
+
+
+def test_listen_drains_on_connect_and_on_wakes_naming_a_watched_table():
+    clock = Clock()
+    consumer = Consumer(clock)
+    socket = Socket(clock, [(30, wake("people")), (30, wake("items", "people")), (60, wake("x"))])
+    result = listen_for(clock, consumer, [socket])
+    assert consumer.at == [0, 60] and result == {"incomplete": False}
+    assert clock.now() == NOW + timedelta(minutes=10)
+
+
+def test_a_dropped_socket_drains_and_reconnects_to_drain_again():
+    clock = Clock()
+    consumer = Consumer(clock)
+    listen_for(clock, consumer, [Socket(clock, [(100, wake("items")), "drop"]), Socket(clock, [])])
+    assert consumer.at == [0, 100, 100, 100 + RETRY_SECONDS]
+
+
+def test_an_unavailable_socket_still_drains_every_retry_interval():
+    clock = Clock()
+    consumer = Consumer(clock)
+    listen_for(clock, consumer, [OSError("refused")] * 20, minutes=3)
+    assert consumer.at == [0, 60, 120]
+
+
+def test_retained_work_is_retried_without_a_wake():
+    clock = Clock()
+    consumer = Consumer(clock, incomplete=[True])
+    listen_for(clock, consumer, [Socket(clock, [])], minutes=5)
+    assert consumer.at == [0, RETRY_SECONDS]
+
+
+def test_an_unreadable_wake_still_drains():
+    clock = Clock()
+    consumer = Consumer(clock)
+    listen_for(clock, consumer, [Socket(clock, [(5, "not json")])])
+    assert consumer.at == [0, 5]
+
+
+def test_listen_applies_a_real_event_on_its_wake():
+    hub, state = setup()
+    clock = Clock()
+
+    class Live(Socket):
+        def recv(self, timeout):
+            message = super().recv(timeout)
+            hub.change({"state": "Done"}, "2026-01-01T01:00:00.000Z")
+            return message
+
+    consumer = SomaEventConsumer(hub, state, POLICY, now=clock.now)
+    result = listen_for(clock, consumer, [Live(clock, [(10, wake("items"))])], minutes=1)
+    assert hub.rows["r"]["finished"] == "2026-01-01T01:00:00.000Z"
+    assert result["pending"] == 0 and not result["incomplete"]

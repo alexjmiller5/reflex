@@ -13,7 +13,8 @@ what the rules here used to, so no rule targets them.
 **Business logic lives in** **`src/core/`** **as plain Python.** Only `app.py`
 imports `modal` - it is the deployment shim (image, secrets, endpoints,
 schedules). Within `src/core/`, only `notion.py` (Notion API) and `hub.py`
-(soma hub) do network I/O - every other module (`registry.py`,
+(soma hub, including the vendored `table_pull.py` it drives) do network
+I/O - every other module (`registry.py`,
 `planner.py`, `rules.py`) is pure functions: dataclasses and dicts in, decisions
 out. Orchestrators consume injected clients; `event_state.py` alone owns the
 local durable journal. This keeps the logic trivially testable and
@@ -39,13 +40,28 @@ and the specs-as-intent carry over as-is.
 * The `DRY_RUN` env var (`Settings.dry_run`) gates all Notion and hub writes -
   when true, automations run their full logic and log what they would have
   written instead of calling the API.
-* The one-minute `daily` tick serializes event delivery and owns the
+* The ten-minute `daily` tick serializes event delivery and owns the
   `reflex-events` Modal Volume. Volume commits precede hub acknowledgments;
   one function/container owns the journal. Stop and drain an active consumer
   before replacing its deployment. Daily dispatch remains due at 11:30 UTC
   with a durable success marker. Runtime policy and reconciled seed are
   operator state, never repository content. Notion sources are retired only
   by explicit runtime IDs; no event policy leaves that backend selected.
+* Events are notify-then-pull, never a per-minute poll: each tick drains once,
+  runs daily work when due, then `soma_events.listen` holds the hub's wake
+  socket (`/v1/changes`, one `{seq, tables}` message per burst of commits)
+  until a minute before the next tick. A message naming a watched table
+  drains; a drain with nothing for Reflex is one subscription status read
+  (hub capabilities are checked once per tick). Every (re)connect drains, and
+  retained work or a down socket drains every 60 s instead.
+* Daily reads go through `table_mirror.TableMirror`, Reflex's copy of each
+  table it reads in `/state/tables.json` on the same volume, kept current by
+  soma's vendored table-pull helper (`table_pull.py`, copied verbatim from
+  soma `src/soma/table_pull.py`; contract: soma `docs/consumer-access.md`):
+  one `/v1/cursor` request when quiet, batched pulls of arrivals otherwise.
+  Tombstones keep their columns, like a hub scan. Only tables a run reads are
+  kept; the copy is pulled in full weekly (purges) and dropped when the hub
+  refuses a held table. Writes and `read_row` go to the hub directly.
 * Cron: Modal is the PREFERRED home for schedules - but the Starter plan
   allows **5 deployed crons across ALL apps**, so track the budget. This app
   uses one slot. Overflow goes to GHA cron or CF Cron Triggers (see the
@@ -93,8 +109,8 @@ and the specs-as-intent carry over as-is.
 
 ## Stack
 
-uv · pydantic-settings (env config) · httpx (Notion API) · fastapi (webhook
-`Request`) · pytest · ruff.
+uv · pydantic-settings (env config) · httpx (Notion API, hub) · websockets
+(hub wake socket) · fastapi (webhook `Request`) · pytest · ruff.
 Config comes from env vars only: Modal Secret in the cloud, `op run` locally.
 `.env.tpl` is the canonical secrets manifest (op\:// refs, committed).
 Instantiate `Settings()` inside functions, never at import time.

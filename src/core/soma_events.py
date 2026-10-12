@@ -3,14 +3,18 @@
 The injected state store must durably commit each assignment. Exactly one
 consumer may own a subscription at a time. Seeding requires a reconciled
 snapshot at its subscription checkpoint; a normal paginated scan is not one.
+`listen` drains when the hub's wake socket names a watched table, instead of
+polling the subscription.
 """
 
 import copy
 import hashlib
 import json
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 
 import httpx
+from websockets.exceptions import WebSocketException
 
 from core.rules import evaluate_transition
 
@@ -67,6 +71,8 @@ class SomaEventConsumer:
         self.data = copy.deepcopy(state[self.key])
         if self.data["policy"] != _digest(policy):
             raise ValueError("policy changed: reconcile and seed a new subscription")
+        self.capable = False  # hub capabilities are checked once per consumer
+        self.acked = None
 
     def _status(self):
         status = self.hub.subscription_status(self.subscription)
@@ -76,7 +82,8 @@ class SomaEventConsumer:
             or status["protocol"] != "durable-pull-v1"
         ):
             raise ValueError("subscription is not active or compatible")
-        if int(status["acked_seq"]) > self.data["last_seq"]:
+        self.acked = int(status["acked_seq"])
+        if self.acked > self.data["last_seq"]:
             raise ValueError("subscription advanced beyond durable local state")
         sources = status.get("sources", [])
         expected = {table: _columns(config) for table, config in self.policy["tables"].items()}
@@ -173,6 +180,7 @@ class SomaEventConsumer:
             ack = self.hub.acknowledge(self.subscription, receipt["id"])
             if int(ack["acked_seq"]) != receipt["through"]:
                 raise ValueError("unexpected acknowledgment checkpoint")
+            self.acked = receipt["through"]
         return True
 
     def _catch_up(self, target, deadline):
@@ -197,9 +205,11 @@ class SomaEventConsumer:
             "subscriptions": "durable-pull-v1",
             "subscription_features": "scalar-lifecycle-v1",
         }
-        caps = self.hub.session()["capabilities"]
-        if any(caps.get(key) != value for key, value in expected.items()):
-            raise ValueError("required hub capabilities unavailable")
+        if not self.capable:
+            caps = self.hub.session()["capabilities"]
+            if any(caps.get(key) != value for key, value in expected.items()):
+                raise ValueError("required hub capabilities unavailable")
+            self.capable = True
         target = self._status()
         if self.hub.dry_run:
             self._delivery(dry_run=True)
@@ -213,8 +223,8 @@ class SomaEventConsumer:
             if self.now() >= deadline or not self._catch_up(target, deadline):
                 break
             # ACK may have failed after the local commit. Reoffer before effects.
-            status = self.hub.subscription_status(self.subscription)
-            if int(status["acked_seq"]) < self.data["last_seq"]:
+            # Every status read and ACK updates `acked`, so a quiet drain is one read.
+            if self.acked < self.data["last_seq"]:
                 self._delivery()
             pending = self._pending()
             if not pending:
@@ -249,3 +259,55 @@ class SomaEventConsumer:
             "last_seq": self.data["last_seq"],
             "incomplete": self.data["last_seq"] < target or bool(self._pending()),
         }
+
+
+RETRY_SECONDS = 60  # retained work, and polling while the wake socket is down
+DRAIN_SECONDS = 40
+
+
+def listen(consumer, connect, until, *, now, sleep=time.sleep):
+    """Drain whenever the hub's wake socket names a watched table, until `until`.
+
+    The change signal keeps no per-client state and never retries, so every
+    (re)connect drains once to cover what a dropped socket missed. Retained
+    work has no wake of its own and is retried every RETRY_SECONDS; while the
+    socket is unavailable that is also the polling interval.
+    """
+    result = None
+    watched = set(consumer.policy["tables"])
+    for _ in _wakes(
+        connect, watched, until, now, sleep, lambda: bool(result and result["incomplete"])
+    ):
+        result = consumer.drain(now() + timedelta(seconds=DRAIN_SECONDS))
+    return result
+
+
+def _wakes(connect, watched, until, now, sleep, retry):
+    left = lambda: (until - now()).total_seconds()  # noqa: E731
+    while left() > 0:
+        try:
+            with connect() as socket:
+                yield
+                while left() > 0:
+                    try:
+                        message = socket.recv(
+                            timeout=min(left(), RETRY_SECONDS) if retry() else left()
+                        )
+                    except TimeoutError:
+                        if retry():
+                            yield
+                        continue
+                    if _names_watched(message, watched):
+                        yield
+        except (OSError, WebSocketException) as exc:
+            print(f"wake socket unavailable ({exc!r}); polling every {RETRY_SECONDS}s")
+            yield
+            sleep(max(0.0, min(RETRY_SECONDS, left())))
+
+
+def _names_watched(message, watched):
+    """A wake lists the tables its commits changed; an unreadable one wakes anyway."""
+    try:
+        return bool(watched & set(json.loads(message)["tables"]))
+    except (ValueError, KeyError, TypeError):
+        return True

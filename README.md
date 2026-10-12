@@ -80,10 +80,14 @@ backfill tasks.
 
 ## Soma workflow events
 
-The scheduled `daily` function is a serialized one-minute tick. Recurring dispatch
+The scheduled `daily` function is a serialized ten-minute tick. Recurring dispatch
 and the remaining Notion compliance sweep still become due at 11:30 UTC and run
 once per due day. Failed ticks do not advance the durable success marker. The
-existing schedule slot is reused.
+existing schedule slot is reused. Between ticks Reflex listens on the hub's wake
+socket and drains the subscription when a commit touches a watched table, so
+events apply within seconds while a quiet hour costs about two dozen hub
+requests. Daily reads come from an incrementally pulled copy of each table on
+the volume (`/state/tables.json`); deleting that file only costs one full pull.
 
 `SOMA_EVENT_POLICY` is optional JSON runtime configuration containing a
 `subscription_id` and `tables` object. Each table policy names its columns,

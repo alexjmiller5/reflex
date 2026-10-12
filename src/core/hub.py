@@ -2,17 +2,22 @@
 
 Pulls the automation catalog rows (recurring specs, keepalive cards) and the
 people names the Christmas generator needs; pushes the gift rows it creates.
+Opens the hub's wake socket for the subscription consumer.
 """
 
 import httpx
 from urllib.parse import quote
 
+from core import table_pull
+
 
 class HubClient:
     def __init__(self, url: str, token: str, dry_run: bool = False):
         self.url, self.token, self.dry_run = url.rstrip("/"), token, dry_run
+        self.requests = 0  # logged per run, so request volume stays visible
 
     def _post(self, path, body):
+        self.requests += 1
         resp = httpx.post(
             f"{self.url}{path}",
             json=body,
@@ -23,6 +28,7 @@ class HubClient:
         return resp.json()
 
     def _get(self, path):
+        self.requests += 1
         resp = httpx.get(
             f"{self.url}{path}",
             headers={"Authorization": f"Bearer {self.token}"},
@@ -30,6 +36,23 @@ class HubClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+    def changes_socket(self):
+        """The hub's wake socket: one `{seq, tables}` text message per burst of
+        commits. Keepalive pings (answered at the edge) detect a dead socket."""
+        from websockets.sync.client import connect
+
+        return connect(
+            "ws" + self.url.removeprefix("http") + "/v1/changes",
+            additional_headers={"Authorization": f"Bearer {self.token}"},
+            subprotocols=["soma-changes-v1"],
+            user_agent_header="reflex",
+            open_timeout=30,
+        )
+
+    def pull_tables(self, tables, state):
+        """soma's incremental table pull (`table_pull.py`) over this client."""
+        return table_pull.pull_tables(self.url, self.token, tables, state, post=self._post)
 
     def session(self):
         return self._get("/v1/session")
