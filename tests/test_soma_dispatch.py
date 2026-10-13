@@ -398,3 +398,36 @@ def test_timed_due_before_day_start_belongs_to_previous_logical_day():
     config = {**CONFIG, "day_start_minutes": 180}
     assert run(hub, state, config=config) == ["series-1: nothing due"]
     assert not hub.inserts
+
+
+def lane_spec():
+    return replace(
+        spec(),
+        templates=(
+            TaskTemplate(
+                title="Review", tags=("Routine",), priority="High", key="review", lane="AI"
+            ),
+        ),
+        match_titles=("Review",),
+    )
+
+
+def test_template_lane_lands_on_the_task_through_the_lane_binding():
+    hub, state = Hub(), {}
+    config = {**CONFIG, "columns": {**CONFIG["columns"], "lane": "who"}}
+    run(hub, state, lane_spec(), config)
+    (row,) = hub.rows.values()
+    assert row["who"] == "AI"
+
+
+def test_template_without_lane_writes_no_lane():
+    hub, state = Hub(), {}
+    run(hub, state, config={**CONFIG, "columns": {**CONFIG["columns"], "lane": "who"}})
+    assert all("who" not in row for row in hub.rows.values())
+
+
+def test_template_lane_without_a_lane_binding_fails_closed():
+    hub, state = Hub(), {}
+    with pytest.raises(ValueError, match="lane"):
+        run(hub, state, lane_spec())
+    assert hub.inserts == []

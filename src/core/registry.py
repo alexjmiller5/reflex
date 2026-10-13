@@ -28,6 +28,7 @@ class TaskTemplate:
     notes: str = ""
     blocked_by_prev: bool = False
     key: str = ""  # stable template identity required by the Soma writer
+    lane: str = ""  # who does the task (the tasks lane column); blank = untriaged
 
 
 @dataclass(frozen=True)

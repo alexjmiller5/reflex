@@ -163,6 +163,10 @@ def dispatch_life(notion, today, recurring, cards, hub, state, config):
                 "notes": template.notes,
                 "links": template.links,
             }
+            if template.lane:
+                if "lane" not in columns:
+                    raise ValueError(f"{spec.key}: template lane needs a lane column binding")
+                values["lane"] = template.lane
             if template.blocked_by_prev:
                 if previous is None:
                     raise ValueError("first template cannot depend on a previous task")
