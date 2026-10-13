@@ -87,7 +87,9 @@ and the specs-as-intent carry over as-is.
   `SOMA_TASKS_CONFIG`. Stable template keys and retained occurrence/adoption
   mappings preserve IDs across retries and title edits. Whole task/gift intent
   is journaled before inserts; partial recovery retains dependency edges.
-  Missing adopted targets fail closed.
+  Missing adopted targets fail closed. Timed dues (UTC instants and floating
+  `YYYY-MM-DDTHH:MM` local times) count on their logical day (local time minus
+  the config's optional `day_start_minutes`); Reflex itself writes dates only.
 * Card keepalive activity is soma finance: each `cc_keepalive_cards` row
   names its `accounts.id`, whose `source` selects the `txns_<source>` table
   (`dispatcher.recent_card_activity`, shared by both task writers). Synthetic

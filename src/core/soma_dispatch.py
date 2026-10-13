@@ -25,15 +25,21 @@ def _identity(*parts):
     ).hex
 
 
-def _day(value, zone):
+def _day(value, zone, day_start=0):
+    """Logical day of a date, UTC instant or floating local time (YYYY-MM-DDTHH:MM).
+
+    A time before the day start belongs to the previous day.
+    """
     if not value:
         return None
     if len(value) == 10:
         return date.fromisoformat(value)
-    instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if instant.tzinfo is None:
+    moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(zone).replace(tzinfo=None)
+    elif len(value) != 16:
         raise ValueError("task instant requires a timezone")
-    return instant.astimezone(zone).date()
+    return (moment - timedelta(minutes=day_start)).date()
 
 
 def _write_plan(plan, hub, state, state_key, records, snapshot):
@@ -58,7 +64,7 @@ def _write_plan(plan, hub, state, state_key, records, snapshot):
 
 def dispatch_life(notion, today, recurring, cards, hub, state, config):
     columns = config["columns"]
-    zone = ZoneInfo(config["time_zone"])
+    zone, start = ZoneInfo(config["time_zone"]), config.get("day_start_minutes", 0)
     rows = hub.pull_rows(config["table"], sorted({"id", "deleted_at", *columns.values()}))
     snapshot = {row["id"]: row for row in rows}
     if len(rows) != len(snapshot):
@@ -121,8 +127,8 @@ def dispatch_life(notion, today, recurring, cards, hub, state, config):
                 TaskSnapshot(
                     title=title,
                     status="Canceled" if row.get("deleted_at") else row.get(columns["status"]),
-                    due=_day(row.get(columns["due"]), zone),
-                    completed=_day(row.get(columns["completed"]), zone),
+                    due=_day(row.get(columns["due"]), zone, start),
+                    completed=_day(row.get(columns["completed"]), zone, start),
                 )
             )
         occurrence = next_occurrence(spec, existing, today)
@@ -141,7 +147,7 @@ def dispatch_life(notion, today, recurring, cards, hub, state, config):
                 r
                 for r in rows
                 if r.get(columns["title"]) == template.title
-                and _day(r.get(columns["due"]), zone) == date.fromisoformat(due)
+                and _day(r.get(columns["due"]), zone, start) == date.fromisoformat(due)
             ]
             if not retained and len(matches) > 1:
                 raise ValueError("ambiguous historical occurrence requires an explicit adoption")
@@ -235,6 +241,7 @@ def _keepalive(notion, today, cards, hub, state, config, snapshot):
 
     activity = recent_card_activity(hub, cards, today)
     columns, zone = config["columns"], ZoneInfo(config["time_zone"])
+    start = config.get("day_start_minutes", 0)
     log = []
     for card in cards:
         key = "keepalive:" + card.account_id
@@ -245,8 +252,8 @@ def _keepalive(notion, today, cards, hub, state, config, snapshot):
             TaskSnapshot(
                 title,
                 "Canceled" if row.get("deleted_at") else row.get(columns["status"]),
-                _day(row.get(columns["due"]), zone),
-                _day(row.get(columns["completed"]), zone),
+                _day(row.get(columns["due"]), zone, start),
+                _day(row.get(columns["completed"]), zone, start),
             )
             for row in snapshot.values()
             if row["id"] in known or row.get(columns["title"]) == title

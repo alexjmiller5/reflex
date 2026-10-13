@@ -378,3 +378,23 @@ def test_adoption_target_cannot_be_rebound_by_later_config():
     with pytest.raises(ValueError, match="adoption"):
         run(hub, state, config={**CONFIG, "adoptions": [{**adoption, "target_id": "replacement"}]})
     assert len(hub.inserts) == before
+
+
+def _existing(hub, due_prepare, due_finish):
+    for row_id, label, due in (("p", "Prepare", due_prepare), ("f", "Finish", due_finish)):
+        hub.rows[row_id] = {"id": row_id, "label": label, "state": "To Do", "due": due}
+
+
+def test_floating_local_due_counts_on_its_own_day():
+    hub, state = Hub(), {}
+    _existing(hub, "2026-01-01T12:00", "2026-01-01T23:30")
+    assert run(hub, state) == ["series-1: nothing due"]
+    assert not hub.inserts
+
+
+def test_timed_due_before_day_start_belongs_to_previous_logical_day():
+    hub, state = Hub(), {}
+    _existing(hub, "2026-01-02T01:00", "2026-01-02T02:00:00.000Z")
+    config = {**CONFIG, "day_start_minutes": 180}
+    assert run(hub, state, config=config) == ["series-1: nothing due"]
+    assert not hub.inserts
