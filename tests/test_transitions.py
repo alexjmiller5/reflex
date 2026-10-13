@@ -54,6 +54,30 @@ def test_canceled_does_not_invent_or_clear_a_completion_date():
     )
 
 
+def test_a_close_date_policy_stamps_completed_and_canceled_once_and_reopen_clears():
+    closed = {
+        "time_zone": "UTC",
+        "timestamps": [
+            {
+                "trigger": "state",
+                "date": "closed",
+                "set_on": ["Done", "Canceled"],
+                "clear_on": ["Open", "Working"],
+            }
+        ],
+    }
+    assert run({"state": "Open"}, {"state": "Canceled"}, ["state"], policy=closed) == {
+        "closed": STAMP
+    }
+    assert run({"state": "Working"}, {"state": "Done"}, ["state"], policy=closed) == {
+        "closed": STAMP
+    }
+    # Done -> Canceled keeps the day it first closed; reopening clears it.
+    after = {"state": "Canceled", "closed": "2025-01-01"}
+    assert run({"state": "Done", "closed": "2025-01-01"}, after, ["state"], policy=closed) == {}
+    assert run(after, {**after, "state": "Open"}, ["state"], policy=closed) == {"closed": None}
+
+
 def test_existing_or_explicitly_edited_dates_are_preserved():
     assert run({"state": "Open"}, {"state": "Done", "finished": "2025-01-01"}, ["state"]) == {}
     assert (

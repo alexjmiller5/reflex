@@ -130,7 +130,14 @@ modal run app.py --seed-file /path/to/private-baseline.json
 The entrypoint calls the deployed worker and refuses an existing seed or a
 checkpoint different from the hub's acknowledged cursor. A policy change
 requires deliberate reconciliation and a new subscription; it cannot silently
-reinterpret the old journal. Seeding does not infer completion dates or apply
+reinterpret the old journal. The one exception is a column rename the
+subscription followed (Soma renames a selected column once the subscription is
+drained): deploy the policy with the new names, then run
+`modal run app.py::adopt_renames --renames '{"<table>": {"<old>": "<new>"}}'`.
+The serialized worker moves the journal's observed values and pending effects
+to the new names, and refuses unless the subscription's sources equal the new
+policy and the renames explain every watched column. Until then each drain
+fails closed on the source mismatch. Seeding does not infer completion dates or apply
 creation defaults to historical rows. `DRY_RUN` never persists consumer state,
 acknowledges deliveries, patches rows or advances daily success; a preview that
 cannot read beyond the outstanding batch is explicitly incomplete.

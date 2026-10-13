@@ -42,19 +42,21 @@ event_volume = modal.Volume.from_name(f"{APP_NAME}-events", create_if_missing=Tr
     timeout=900,
     retries=modal.Retries(max_retries=2, initial_delay=60.0),
 )
-def daily(seed: dict | None = None):
+def daily(seed: dict | None = None, renames: dict | None = None):
     """Single serialized tick: drain, daily work when due (11:30 UTC), then
     listen on the hub's wake socket until just before the next tick.
 
     The optional seed is an operator-supplied reconciled subscription baseline,
     installed through this same serialized function before consumer activation.
+    Optional renames ({table: {old: new}}) adopt the deployed policy after the
+    hub renamed watched columns of the same subscription.
     """
     from datetime import datetime, timedelta, timezone
 
     from core.config import Settings
     from core.event_state import locked_state
     from core.hub import HubClient
-    from core.soma_events import SomaEventConsumer, listen, seed_projection
+    from core.soma_events import SomaEventConsumer, adopt_policy, listen, seed_projection
     from core.tick import note_backlog, run_tick
 
     s = Settings()
@@ -72,6 +74,12 @@ def daily(seed: dict | None = None):
                 journal, s.soma_event_policy, seed["tables"], through_seq=seed["through_seq"]
             )
             return {"seeded": True, "through_seq": seed["through_seq"]}
+        if renames is not None:
+            if s.dry_run or s.soma_event_policy is None:
+                raise ValueError("adoption requires a configured, non-dry-run subscription")
+            status = hub.subscription_status(s.soma_event_policy["subscription_id"])
+            adopt_policy(journal, s.soma_event_policy, status["sources"], renames)
+            return {"adopted": True, "renames": renames}
 
         consumer = None
         if s.soma_event_policy is not None:
@@ -175,6 +183,14 @@ def seed_events(seed_file: str):
     # Resolve the deployed function, not a second ephemeral writer deployment.
     worker = modal.Function.from_name(APP_NAME, "daily")
     print(worker.remote(seed=seed))
+
+
+@app.local_entrypoint()
+def adopt_renames(renames: str):
+    """After the hub renamed watched columns: adopt the deployed policy, e.g.
+    --renames '{"tasks": {"completed_date": "closed_date"}}'."""
+    worker = modal.Function.from_name(APP_NAME, "daily")
+    print(worker.remote(renames=json.loads(renames)))
 
 
 # max_containers bounds the cost of a flood: signature checking happens in

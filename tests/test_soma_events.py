@@ -9,7 +9,13 @@ import pytest
 
 from websockets.exceptions import ConnectionClosedError
 
-from core.soma_events import RETRY_SECONDS, SomaEventConsumer, listen, seed_projection
+from core.soma_events import (
+    RETRY_SECONDS,
+    SomaEventConsumer,
+    adopt_policy,
+    listen,
+    seed_projection,
+)
 
 NOW = datetime(2026, 1, 2, tzinfo=timezone.utc)
 DEADLINE = NOW + timedelta(minutes=1)
@@ -42,6 +48,7 @@ class Hub:
                 "hub_at": "2026-01-01T00:00:00.000Z",
             }
         }
+        self.columns = ["state", "finished", "tags"]
         self.events = []
         self.acked = 0
         self.pending = None
@@ -67,10 +74,15 @@ class Hub:
             "state": "active",
             "last_seq": str(len(self.events)),
             "acked_seq": str(self.acked),
-            "sources": [
-                {"table": "items", "columns": ["state", "finished", "tags"], "lifecycle": True}
-            ],
+            "sources": [{"table": "items", "columns": list(self.columns), "lifecycle": True}],
         }
+
+    def rename(self, old, new):
+        """The hub renamed a watched column and the subscription followed it."""
+        assert self.acked == len(self.events) and self.pending is None
+        self.columns = [new if c == old else c for c in self.columns]
+        for row in self.rows.values():
+            row[new] = row.pop(old)
 
     def change(self, values, stamp, *, operation="update", row_id="r"):
         old = copy.deepcopy(self.rows.get(row_id, {}))
@@ -81,7 +93,7 @@ class Hub:
             row["deleted_at"] = None
         self.rows[row_id] = row
         changes = []
-        for col in ["state", "finished", "tags"]:
+        for col in self.columns:
             before = None if operation == "insert" or old.get("deleted_at") else old.get(col)
             after = None if operation == "delete" else row.get(col)
             if before != after:
@@ -504,3 +516,64 @@ def test_listen_applies_a_real_event_on_its_wake():
     result = listen_for(clock, consumer, [Live(clock, [(10, wake("items"))])], minutes=1)
     assert hub.rows["r"]["finished"] == "2026-01-01T01:00:00.000Z"
     assert result["pending"] == 0 and not result["incomplete"]
+
+
+RENAMED = copy.deepcopy(POLICY)
+RENAMED["tables"]["items"]["timestamps"] = [
+    {"trigger": "state", "date": "closed", "set_on": ["Done", "Dropped"], "clear_on": ["Open"]}
+]
+
+
+def test_adopting_a_followed_column_rename_keeps_the_journal():
+    hub, state = setup()
+    hub.change({"state": "Done"}, "2026-01-01T01:00:00.000Z")
+    drain(hub, state)
+    hub.rename("finished", "closed")
+    with pytest.raises(ValueError, match="policy changed"):
+        SomaEventConsumer(hub, state, RENAMED)
+    sources = hub.subscription_status("sub")["sources"]
+    adopt_policy(state, RENAMED, sources, {"items": {"finished": "closed"}})
+    observed = state["subscription:sub"]["projection"]["items"]["r"]["observed"]
+    assert observed == {"closed": "2026-01-01T01:00:00.000Z", "state": "Done", "tags": None}
+    consumer = SomaEventConsumer(hub, state, RENAMED, now=lambda: NOW)
+    hub.change({"state": "Open"}, "2026-01-01T02:00:00.000Z")
+    consumer.drain(DEADLINE)
+    assert hub.rows["r"]["closed"] is None
+    hub.change({"state": "Dropped"}, "2026-01-01T03:00:00.000Z")
+    consumer.drain(DEADLINE)
+    assert hub.rows["r"]["closed"] == "2026-01-01T03:00:00.000Z"
+    assert hub.patches[-2:] == [{"closed": None}, {"closed": "2026-01-01T03:00:00.000Z"}]
+
+
+def test_adoption_keeps_pending_effects_under_the_new_name():
+    hub, state = setup()
+    hub.change({"state": "Done"}, "2026-01-01T01:00:00.000Z")
+    hub.patch_row = lambda *a: (_ for _ in ()).throw(httpx.ConnectError("down"))
+    with pytest.raises(httpx.ConnectError):
+        drain(hub, state)
+    assert state["subscription:sub"]["projection"]["items"]["r"]["pending"] == {
+        "finished": "2026-01-01T01:00:00.000Z"
+    }
+    hub.rename("finished", "closed")
+    adopt_policy(
+        state, RENAMED, hub.subscription_status("sub")["sources"], {"items": {"finished": "closed"}}
+    )
+    assert state["subscription:sub"]["projection"]["items"]["r"]["pending"] == {
+        "closed": "2026-01-01T01:00:00.000Z"
+    }
+
+
+@pytest.mark.parametrize("case", ["hub_not_renamed", "renames_unexplained", "not_seeded"])
+def test_adoption_refuses_what_the_renames_do_not_explain(case):
+    hub, state = setup()
+    if case != "hub_not_renamed":
+        hub.rename("finished", "closed")
+    renames = {"items": {"finished": "closed"}}
+    if case == "renames_unexplained":
+        renames = {"items": {"finished": "done_on"}}
+    if case == "not_seeded":
+        state = {}
+    before = copy.deepcopy(state)
+    with pytest.raises(ValueError):
+        adopt_policy(state, RENAMED, hub.subscription_status("sub")["sources"], renames)
+    assert state == before

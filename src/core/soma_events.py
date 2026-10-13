@@ -60,6 +60,35 @@ def seed_projection(state, policy, tables, *, through_seq):
     }
 
 
+def adopt_policy(state, policy, sources, renames):
+    """Carry a seeded journal onto a changed policy for the SAME subscription.
+
+    Only for a subscription whose watched columns the hub renamed (it follows a
+    rename once drained): `sources` is the subscription's current status and
+    `renames` maps `{table: {old: new}}`. Observed values and pending effects
+    keep their data under the new names; nothing is re-derived. Anything the
+    renames do not explain fails closed and leaves the journal untouched.
+    """
+    key = "subscription:" + policy["subscription_id"]
+    if key not in state:
+        raise ValueError("subscription requires a reconciled seed")
+    expected = {table: _columns(config) for table, config in policy["tables"].items()}
+    if {s["table"]: sorted(s["columns"]) for s in sources} != expected:
+        raise ValueError("subscription sources do not match the new policy")
+    data = copy.deepcopy(state[key])
+    if set(data["projection"]) != set(expected):
+        raise ValueError("policy tables differ from the seeded projection")
+    for table, rows in data["projection"].items():
+        moves = renames.get(table, {})
+        for row in rows.values():
+            for part in ("observed", "pending"):
+                row[part] = {moves.get(col, col): value for col, value in row[part].items()}
+            if sorted(row["observed"]) != expected[table]:
+                raise ValueError("renames do not explain the new watched columns")
+    data["policy"] = _digest(policy)
+    state[key] = data
+
+
 class SomaEventConsumer:
     def __init__(self, hub, state, policy, *, now=None):
         self.hub, self.state, self.policy = hub, state, policy
