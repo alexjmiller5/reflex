@@ -169,6 +169,38 @@ def drain(hub, state):
     return SomaEventConsumer(hub, state, POLICY, now=lambda: NOW).drain(DEADLINE)
 
 
+@pytest.mark.parametrize("change_tags", [False, True])
+def test_json_text_events_and_live_rows_match_decoded_seed(change_tags):
+    hub = Hub()
+    hub.rows["r"]["tags"] = ["Routine"]
+    state = {}
+    seed_projection(state, POLICY, {"items": list(hub.rows.values())}, through_seq="0")
+    # SQL event triggers expose JSON columns as text; a reconciled seed may decode them.
+    hub.rows["r"]["tags"] = '["Routine"]'
+    values = {"state": "Done"}
+    if change_tags:
+        values["tags"] = None
+    hub.change(values, "2026-01-01T01:00:00.000Z")
+    result = drain(hub, state)
+    assert not result["incomplete"]
+    assert hub.rows["r"]["finished"] == "2026-01-01T01:00:00.000Z"
+    assert hub.patches == [{"finished": "2026-01-01T01:00:00.000Z"}]
+
+
+@pytest.mark.parametrize("value", ['["Other"]', '"Routine"', "broken JSON"])
+def test_genuine_json_seed_mismatch_is_rejected_without_advancing(value):
+    hub = Hub()
+    hub.rows["r"]["tags"] = ["Routine"]
+    state = {}
+    seed_projection(state, POLICY, {"items": list(hub.rows.values())}, through_seq="0")
+    hub.rows["r"]["tags"] = value
+    hub.change({"tags": None}, "2026-01-01T01:00:00.000Z")
+    with pytest.raises(ValueError, match="durable projection"):
+        drain(hub, state)
+    assert state["subscription:sub"]["last_seq"] == 0
+    assert not hub.acks and not hub.patches
+
+
 def test_event_is_persisted_before_ack_and_fix_uses_event_time():
     hub, state = setup()
     hub.change({"state": "Done"}, "2026-01-01T01:00:00.000Z")

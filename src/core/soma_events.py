@@ -25,6 +25,18 @@ def _digest(value):
     ).hexdigest()
 
 
+def _same_value(left, right):
+    """SQL events carry JSON as text; reconciled seeds may decode containers."""
+    if isinstance(left, (list, dict)) and isinstance(right, str):
+        try:
+            right = json.loads(right)
+        except ValueError:
+            return False
+    elif isinstance(right, (list, dict)) and isinstance(left, str):
+        return _same_value(right, left)
+    return left == right
+
+
 def _columns(policy):
     columns = set(policy.get("creation_defaults", {}))
     for rule in policy.get("timestamps", []) + policy.get("checkbox_timestamps", []):
@@ -152,7 +164,7 @@ class SomaEventConsumer:
             if col not in row["observed"] or col in changed:
                 raise ValueError("unexpected or repeated watched column")
             expected = None if row["deleted"] else row["observed"][col]
-            if change["old_value"] != expected:
+            if not _same_value(change["old_value"], expected):
                 raise ValueError("event does not match durable projection")
             changed.add(col)
             row["observed"][col] = change["new_value"]
@@ -171,7 +183,7 @@ class SomaEventConsumer:
             row["pending"] = {
                 col: value
                 for col, value in row["pending"].items()
-                if value != row["observed"].get(col)
+                if not _same_value(value, row["observed"].get(col))
             }
         data["last_seq"] = int(event["seq"])
 
@@ -272,7 +284,7 @@ class SomaEventConsumer:
             if (
                 not live
                 or live.get("deleted_at")
-                or any(live.get(col) != row["observed"][col] for col in columns)
+                or any(not _same_value(live.get(col), row["observed"][col]) for col in columns)
             ):
                 continue
             revision = {key: live[key] for key in ("updated_at", "hub_at")}

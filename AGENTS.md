@@ -47,6 +47,8 @@ and the specs-as-intent carry over as-is.
   with a durable success marker. Runtime policy and reconciled seed are
   operator state, never repository content. Notion sources are retired only
   by explicit runtime IDs; no event policy leaves that backend selected.
+  Event and live-row comparisons accept JSON text matching a decoded array
+  or object in the seed; genuine value mismatches still fail before ACK.
 * Events are notify-then-pull, never a per-minute poll: each tick drains once,
   runs daily work when due, then `soma_events.listen` holds the hub's wake
   socket (`/v1/changes`, one `{seq, tables}` message per burst of commits)
