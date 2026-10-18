@@ -1,23 +1,81 @@
 import json
 import re
-from contextlib import ExitStack
+from datetime import datetime, timezone
 
 import httpx
+import httpcore
 import pytest
 
 from core.hub import HubClient
+from core.tick import run_tick
+
+
+@pytest.mark.parametrize("operation", ["session", "acknowledge"])
+@pytest.mark.parametrize("failure", [httpcore.ConnectError, httpcore.ConnectTimeout])
+@pytest.mark.parametrize("recover", [True, False])
+def test_hub_retries_only_connection_establishment(monkeypatch, operation, failure, recover):
+    from httpcore._backends.sync import SyncBackend
+
+    attempts = []
+
+    def connect(*args, **kwargs):
+        attempts.append(kwargs)
+        if not recover or len(attempts) < 3:
+            raise failure("[Errno 101] Network is unreachable")
+        return httpcore.MockStream([b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{"ok":true}'])
+
+    monkeypatch.setattr(SyncBackend, "connect_tcp", connect)
+    monkeypatch.setattr(SyncBackend, "sleep", lambda *args: None)
+    client = HubClient("https://hub.example", "test-token")
+    call = client.session if operation == "session" else lambda: client.acknowledge("s", "d")
+    if recover and operation == "session":
+        state = {}
+        assert run_tick(
+            state,
+            datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            lambda: None,
+            consume=lambda: not call()["ok"],
+        ) == {"daily": True}
+        assert state["daily_success"] == "2026-01-01"
+    elif recover:
+        assert call() == {"ok": True}
+    else:
+        with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
+            call()
+    assert len(attempts) == 3
+
+
+@pytest.mark.parametrize("failure", [httpcore.ReadTimeout, httpcore.WriteError])
+def test_native_transport_never_replays_an_uncertain_write(monkeypatch, failure):
+    from httpcore._backends.sync import SyncBackend
+
+    attempts = []
+
+    class LostResponse(httpcore.MockStream):
+        def read(self, *args, **kwargs):
+            raise httpcore.ReadTimeout("write outcome unknown")
+
+        def write(self, *args, **kwargs):
+            if failure is httpcore.WriteError:
+                raise failure("write outcome unknown")
+
+    def connect(*args, **kwargs):
+        attempts.append(kwargs)
+        return LostResponse([])
+
+    monkeypatch.setattr(SyncBackend, "connect_tcp", connect)
+    with pytest.raises((httpx.ReadTimeout, httpx.WriteError)):
+        HubClient("https://hub.example", "test-token").acknowledge("s", "d")
+    assert len(attempts) == 1
 
 
 @pytest.fixture
 def hub(monkeypatch):
-    with ExitStack() as stack:
+    def make(handler, *, dry_run=False):
+        monkeypatch.setattr(httpx, "HTTPTransport", lambda **kwargs: httpx.MockTransport(handler))
+        return HubClient("https://hub.example/", "test-token", dry_run=dry_run)
 
-        def make(handler, *, dry_run=False):
-            client = stack.enter_context(httpx.Client(transport=httpx.MockTransport(handler)))
-            monkeypatch.setattr(httpx, "post", client.post)
-            return HubClient("https://hub.example/", "test-token", dry_run=dry_run)
-
-        yield make
+    return make
 
 
 def test_pull_exhausts_pages_and_retains_tombstones(hub):
@@ -259,7 +317,7 @@ def test_dry_run_makes_no_writes_and_claims_no_committed_receipt(hub):
     )
 
 
-def test_subscription_reads_and_ack_use_supported_endpoints(hub, monkeypatch):
+def test_subscription_reads_and_ack_use_supported_endpoints(hub):
     seen = []
 
     def handler(request):
@@ -270,12 +328,10 @@ def test_subscription_reads_and_ack_use_supported_endpoints(hub, monkeypatch):
         return httpx.Response(200, json={"ok": True})
 
     client = hub(handler)
-    with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
-        monkeypatch.setattr(httpx, "get", transport.get)
-        assert client.session() == {"ok": True}
-        assert client.subscription_status("sub") == {"ok": True}
-        assert client.poll_events("sub") == {"ok": True}
-        assert client.acknowledge("sub", "delivery") == {"ok": True}
+    assert client.session() == {"ok": True}
+    assert client.subscription_status("sub") == {"ok": True}
+    assert client.poll_events("sub") == {"ok": True}
+    assert client.acknowledge("sub", "delivery") == {"ok": True}
     assert seen == [
         ("GET", "/v1/session", b""),
         ("GET", "/v1/subscriptions/sub", b""),

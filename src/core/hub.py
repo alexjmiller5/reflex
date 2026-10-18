@@ -18,26 +18,26 @@ class HubClient:
         self.url, self.token, self.dry_run = url.rstrip("/"), token, dry_run
         self.requests = 0  # logged per run, so request volume stays visible
 
-    def _post(self, path, body):
+    def _request(self, method, path, **kwargs):
         self.requests += 1
-        resp = httpx.post(
-            f"{self.url}{path}",
-            json=body,
-            headers={"Authorization": f"Bearer {self.token}"},
-            timeout=30,
-        )
+        # Retry only connection establishment, before any request is sent.
+        # A lost response to a write must still reach the journal's recovery path.
+        with httpx.Client(transport=httpx.HTTPTransport(retries=2)) as client:
+            resp = client.request(
+                method,
+                f"{self.url}{path}",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=30,
+                **kwargs,
+            )
         resp.raise_for_status()
         return resp.json()
 
+    def _post(self, path, body):
+        return self._request("POST", path, json=body)
+
     def _get(self, path):
-        self.requests += 1
-        resp = httpx.get(
-            f"{self.url}{path}",
-            headers={"Authorization": f"Bearer {self.token}"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return resp.json()
+        return self._request("GET", path)
 
     def changes_socket(self):
         """The hub's wake socket: one `{seq, tables}` text message per burst of
