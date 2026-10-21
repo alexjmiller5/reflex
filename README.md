@@ -131,9 +131,14 @@ modal run app.py --seed-file /path/to/private-baseline.json
 ```
 
 The entrypoint calls the deployed worker and refuses an existing seed or a
-checkpoint different from the hub's acknowledged cursor. A policy change
-requires deliberate reconciliation and a new subscription; it cannot silently
-reinterpret the old journal. The one exception is a column rename the
+checkpoint different from the hub's acknowledged cursor. Policy changes normally
+require deliberate reconciliation and a new subscription. Creation-only rule
+changes that keep the watched columns can use the serialized
+`modal run app.py::adopt_creation_rules --previous-policy-file <private-policy.json>`
+entrypoint after deployment: it drains using the exact previous policy, verifies
+the checkpoint and absence of pending effects, and carries the existing projection
+forward without reapplying defaults to historical rows. Column changes still
+require a new subscription except for a column rename the
 subscription followed (Soma renames a selected column once the subscription is
 drained): deploy the policy with the new names, then run
 `modal run app.py::adopt_renames --renames '{"<table>": {"<old>": "<new>"}}'`.

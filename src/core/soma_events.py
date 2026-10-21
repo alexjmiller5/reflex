@@ -101,6 +101,33 @@ def adopt_policy(state, policy, sources, renames):
     state[key] = data
 
 
+def adopt_creation_policy(state, policy, previous, status):
+    """Change only future creation rules at a fully reconciled checkpoint."""
+    key = "subscription:" + policy["subscription_id"]
+    data = state[key]
+    if data["policy"] != _digest(previous):
+        raise ValueError("previous policy does not match the journal")
+    stripped = []
+    for candidate in (previous, policy):
+        candidate = copy.deepcopy(candidate)
+        for config in candidate["tables"].values():
+            for name in ("creation_defaults", "due_on_creation", "creation_outcome"):
+                config.pop(name, None)
+        stripped.append(candidate)
+    if stripped[0] != stripped[1]:
+        raise ValueError("only creation rules may change at this checkpoint")
+    if (
+        status["id"] != policy["subscription_id"]
+        or status["state"] != "active"
+        or int(status["acked_seq"]) != int(status["last_seq"])
+        or int(status["acked_seq"]) != data["last_seq"]
+        or (data["delivery"] is not None and data["delivery"]["through"] != data["last_seq"])
+        or any(row["pending"] for rows in data["projection"].values() for row in rows.values())
+    ):
+        raise ValueError("creation policy adoption requires a drained checkpoint")
+    adopt_policy(state, policy, status["sources"], {})
+
+
 class SomaEventConsumer:
     def __init__(self, hub, state, policy, *, now=None):
         self.hub, self.state, self.policy = hub, state, policy

@@ -91,6 +91,11 @@ and the specs-as-intent carry over as-is.
   event time, preserves supplied
   values and explicit date edits, and never applies creation defaults to a
   historical seed or an unrelated edit. The Notion evaluator remains separate.
+  Same-column creation-rule changes use the serialized `adopt_creation_rules`
+  operator entrypoint with the exact previous private policy. It drains under
+  that policy and verifies an empty checkpoint before adoption, preserving the
+  projection without historical default backfill. Other policy changes require
+  a reconciled new subscription or the supported column-rename adoption.
 * `soma_dispatch.py` owns the optional recurring task adapter, selected by
   `SOMA_TASKS_CONFIG`. Stable template keys and retained occurrence/adoption
   mappings preserve IDs across retries and title edits. Whole task/gift intent

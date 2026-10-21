@@ -609,3 +609,45 @@ def test_adoption_refuses_what_the_renames_do_not_explain(case):
     with pytest.raises(ValueError):
         adopt_policy(state, RENAMED, hub.subscription_status("sub")["sources"], renames)
     assert state == before
+
+
+def test_drained_creation_policy_adoption_is_prospective_and_keeps_checkpoint():
+    from core.soma_events import adopt_creation_policy
+
+    hub, state = setup()
+    hub.change({"state": "Done"}, "2026-01-01T00:01:00.000Z")
+    drain(hub, state)
+    revised = copy.deepcopy(POLICY)
+    revised["tables"]["items"]["creation_defaults"]["tags"] = ["Updated"]
+    before = copy.deepcopy(state)
+    adopt_creation_policy(state, revised, POLICY, hub.subscription_status("sub"))
+    assert state["subscription:sub"]["projection"] == before["subscription:sub"]["projection"]
+    consumer = SomaEventConsumer(hub, state, revised, now=lambda: NOW)
+    hub.change({"state": "Open"}, "2026-01-01T01:00:00.000Z", operation="insert", row_id="new")
+    consumer.drain(DEADLINE)
+    assert hub.rows["new"]["tags"] == ["Updated"]
+    assert hub.rows["r"]["tags"] is None
+
+
+@pytest.mark.parametrize("problem", ["backlog", "pending", "old_policy", "timestamps", "columns"])
+def test_creation_policy_adoption_refuses_unreconciled_or_unrelated_changes(problem):
+    from core.soma_events import adopt_creation_policy
+
+    hub, state = setup()
+    revised = copy.deepcopy(POLICY)
+    revised["tables"]["items"]["creation_defaults"]["tags"] = ["Updated"]
+    previous = copy.deepcopy(POLICY)
+    if problem == "backlog":
+        hub.change({"state": "Done"}, "2026-01-01T01:00:00.000Z")
+    elif problem == "pending":
+        state["subscription:sub"]["projection"]["items"]["r"]["pending"] = {"tags": ["Routine"]}
+    elif problem == "old_policy":
+        previous["tables"]["items"]["creation_defaults"]["tags"] = ["Wrong"]
+    elif problem == "timestamps":
+        revised["tables"]["items"]["timestamps"][0]["set_on"] = ["Dropped"]
+    elif problem == "columns":
+        revised["tables"]["items"]["creation_defaults"]["other"] = "value"
+    before = copy.deepcopy(state)
+    with pytest.raises(ValueError):
+        adopt_creation_policy(state, revised, previous, hub.subscription_status("sub"))
+    assert state == before
