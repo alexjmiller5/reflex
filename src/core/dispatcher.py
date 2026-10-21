@@ -94,6 +94,18 @@ def _hydrate_recipients(spec, hub):
                 blocked_by_prev=True,
             )
         )
+    configured = {template.key: template for template in spec.templates}
+    for i, template in enumerate(templates):
+        if template.key in configured:
+            override = configured[template.key]
+            person_id = template.key.rsplit(":", 1)[0]
+            templates[i] = replace(
+                override,
+                title=override.title.replace("{name}", full_names[person_id]),
+                notes=override.notes.replace("{name}", full_names[person_id]).replace(
+                    "{person_id}", person_id
+                ),
+            )
     hydrated = replace(
         spec,
         templates=tuple(templates),

@@ -312,3 +312,41 @@ def test_notion_partial_occurrence_restores_existing_blocker_identity():
         if props["Name"]["title"][0]["text"]["content"] == spec.templates[1].title
     )
     assert first_buy["Blocked by"]["relation"] == [{"id": "existing-preparation"}]
+
+
+def test_gift_templates_preserve_recipient_specific_lanes_and_instructions():
+    # Removing the recipient-keyed override would erase lane and research instructions.
+    configured = replace(
+        CHRISTMAS,
+        templates=(
+            TaskTemplate(
+                key="r1:brainstorm",
+                title="Research gift ideas for {name}",
+                tags=("Gifts",),
+                priority="High",
+                lane="AI",
+                notes="Recipient {name}, people.id={person_id}. Review messages and people notes.",
+            ),
+            TaskTemplate(
+                key="r1:buy",
+                title="Buy chosen gift",
+                tags=("Gifts",),
+                priority="High",
+                lane="Me",
+                due_offset_days=30,
+                blocked_by_prev=True,
+                notes="Recipient {name}, people.id={person_id}.",
+            ),
+        ),
+    )
+    hydrated, _ = _hydrate_recipients(configured, FakeHub())
+    first, second = hydrated.templates[:2]
+    assert first.lane == "AI" and second.lane == "Me"
+    assert first.title == "Research gift ideas for Person0 Surname"
+    assert first.notes == (
+        "Recipient Person0 Surname, people.id=r1. Review messages and people notes."
+    )
+    assert second.notes == "Recipient Person0 Surname, people.id=r1."
+    assert second.blocked_by_prev and second.due_offset_days == 30
+    assert first.key == "r1:brainstorm" and second.key == "r1:buy"
+    assert hydrated.templates[2].key == "r2:brainstorm"  # unconfigured recipient fallback

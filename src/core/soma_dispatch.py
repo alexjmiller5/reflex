@@ -266,7 +266,11 @@ def _keepalive(notion, today, cards, hub, state, config, snapshot):
             continue
         defaults = config["keepalive_defaults"]
         template = TaskTemplate(
-            title=title, tags=tuple(defaults["tags"]), priority=defaults["priority"], key="reminder"
+            title=title,
+            tags=tuple(defaults["tags"]),
+            priority=defaults["priority"],
+            key="reminder",
+            lane=defaults.get("lane", ""),
         )
         recurring = RecurringSpec(
             key=key,

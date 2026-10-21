@@ -173,7 +173,14 @@ bindings add their own table/columns, defaults, description/date templates and
 optional task links to the same retained occurrence. Failed gift creation is
 recoverable even after all related tasks were created.
 
-Card keepalive tasks use the selected Soma binding and `keepalive_defaults`;
+Gift specs may supply recipient-keyed templates (`<people-id>:brainstorm` and
+`<people-id>:buy`) in `templates` to set lanes, instructions and other task values.
+In configured titles and notes, `{name}` resolves to the recipient's full name;
+`{person_id}` in notes resolves to their stable Soma people ID. Unconfigured
+recipients retain the built-in task pair.
+
+Card keepalive tasks use the selected Soma binding and `keepalive_defaults`
+(tags, priority and optional lane);
 each card's occurrence identity is its `account_id`. An absent task binding
 preserves the existing Notion writer.
 

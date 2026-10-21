@@ -210,9 +210,33 @@ def test_gift_retry_finishes_gifts_after_all_tasks_already_exist():
             return super().insert_rows(table, rows)
 
     hub, state = GiftHub(), {}
-    recurring = replace(spec(), templates=(), match_titles=(), gift_recipients=("person-1",))
+    recurring = replace(
+        spec(),
+        match_titles=(),
+        gift_recipients=("person-1",),
+        templates=(
+            TaskTemplate(
+                key="person-1:brainstorm",
+                title="Ideas for {name}",
+                tags=("Gifts",),
+                priority="High",
+                lane="AI",
+                notes="Recipient {person_id}: {name}.",
+            ),
+            TaskTemplate(
+                key="person-1:buy",
+                title="Buy for {name}",
+                tags=("Gifts",),
+                priority="High",
+                lane="Me",
+                due_offset_days=30,
+                blocked_by_prev=True,
+            ),
+        ),
+    )
     config = {
         **CONFIG,
+        "columns": {**CONFIG["columns"], "lane": "who"},
         "gifts": {
             "table": "presents",
             "columns": {
@@ -237,6 +261,11 @@ def test_gift_retry_finishes_gifts_after_all_tasks_already_exist():
     gift = next(iter(hub.gifts.values()))
     assert set(gift["tasks"]) == set(hub.rows)
     assert gift["people"] == ["person-1"] and gift["day"] == "2026-12-25"
+    ideas = next(r for r in hub.rows.values() if r["who"] == "AI")
+    purchase = next(r for r in hub.rows.values() if r["who"] == "Me")
+    assert ideas["label"] == "Ideas for Example Person"
+    assert ideas["body"] == "Recipient person-1: Example Person."
+    assert purchase["blocked_by"] == [ideas["id"]]
 
 
 class FinanceHub(Hub):
@@ -258,7 +287,11 @@ def test_keepalive_reads_life_finance_and_creates_life_task():
     from core.registry import KeepaliveCard
 
     hub, state = FinanceHub([{"id": "t1", "account_id": "acct-1", "date": "2024-12-31"}]), {}
-    config = {**CONFIG, "keepalive_defaults": {"tags": ["Finance"], "priority": "Medium"}}
+    config = {
+        **CONFIG,
+        "columns": {**CONFIG["columns"], "lane": "who"},
+        "keepalive_defaults": {"tags": ["Finance"], "priority": "Medium", "lane": "Me"},
+    }
     card = KeepaliveCard("Card A", "acct-1")
     for _ in range(2):
         # notion=None: neither a Notion Transactions read nor a Notion task write
@@ -266,6 +299,7 @@ def test_keepalive_reads_life_finance_and_creates_life_task():
     assert len(hub.rows) == 1
     row = next(iter(hub.rows.values()))
     assert row["tags"] == ["Finance"] and row["label"].startswith("My Card A card")
+    assert row["who"] == "Me"
     assert "recurrence:keepalive:acct-1" in state
 
 

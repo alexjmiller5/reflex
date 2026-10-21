@@ -34,7 +34,11 @@ and the specs-as-intent carry over as-is.
   clearing it. Every template in a spec's `templates` JSON carries a `key`,
   unique within the spec and never renamed: it is the template's identity in
   retained plans and adoptions, so the loader rejects a spec whose templates
-  lack one. `registry.py` ships only the Notion data-source ids, the
+  lack one. Gift specs can override generated tasks with recipient-keyed templates
+  (`<people-id>:brainstorm` / `<people-id>:buy`); their lanes and instructions
+  live in the spec, with `{name}` and `{person_id}` resolved at dispatch.
+  Card reminder lanes come from runtime `keepalive_defaults.lane`.
+  `registry.py` ships only the Notion data-source ids, the
   dataclasses, and the row loaders. Personal spec content (chores, finances,
   people) must NEVER be committed to this repo - that's why it moved out.
 * The `DRY_RUN` env var (`Settings.dry_run`) gates all Notion and hub writes -
