@@ -94,7 +94,10 @@ the volume (`/state/tables.json`); deleting that file only costs one full pull.
 
 `SOMA_EVENT_POLICY` is optional JSON runtime configuration containing a
 `subscription_id` and `tables` object. Each table policy names its columns,
-transition values, creation defaults, timezone and optional day boundary. No
+transition values, creation defaults, timezone and optional day boundary.
+A `creation_outcome.when` condition matches a scalar exactly or any value in
+an array; all named conditions must match. This supports several accepted
+categories while still requiring successful execution. No
 policy means no Soma event writes. `NOTION_RETIRED_SOURCES` is an explicit
 comma-separated list of migrated Notion data source IDs; it disables their old
 webhook rules and compliance sweeps without disabling unrelated sources.

@@ -216,7 +216,10 @@ def evaluate_transition(before, after, changed, occurred_at, policy, created=Fal
             if effective.get(rule["column"]) in rule["replaceable"]:
                 desired = (
                     rule["value"]
-                    if all(effective.get(k) == v for k, v in rule["when"].items())
+                    if all(
+                        effective.get(k) in v if isinstance(v, list) else effective.get(k) == v
+                        for k, v in rule["when"].items()
+                    )
                     else rule["default"]
                 )
                 assign(rule["column"], desired)

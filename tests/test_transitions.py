@@ -196,6 +196,44 @@ def test_successful_creation_review_rule_uses_effective_outcome_and_keeps_manual
     )
 
 
+@pytest.mark.parametrize(
+    ("category", "result", "outcome", "created", "expected"),
+    [
+        ("bookmark", "Success", "Pending", True, {"outcome": "Accepted", "reviewed": STAMP}),
+        ("task", "Success", "Pending", True, {"outcome": "Accepted", "reviewed": STAMP}),
+        ("task", "Error", "Pending", True, {}),
+        ("other", "Success", "Pending", True, {}),
+        (None, "Success", "Pending", True, {}),
+        ("task", "Success", "Bug", True, {}),
+        ("task", "Success", "Pending", False, {}),
+    ],
+)
+def test_creation_outcome_accepts_category_choices_without_hiding_errors_or_manual_review(
+    category, result, outcome, created, expected
+):
+    policy = {
+        "creation_outcome": {
+            "column": "outcome",
+            "default": "Pending",
+            "replaceable": [None, "Pending"],
+            "when": {"result": "Success", "category": ["bookmark", "task"]},
+            "value": "Accepted",
+        },
+        "timestamps": [
+            {"trigger": "outcome", "date": "reviewed", "set_on": ["Accepted"], "clear_on": []}
+        ],
+    }
+    assert (
+        run(
+            {},
+            {"category": category, "result": result, "outcome": outcome},
+            created=created,
+            policy=policy,
+        )
+        == expected
+    )
+
+
 def test_invalid_timezone_or_naive_time_fails_instead_of_guessing():
     with pytest.raises(ValueError):
         run({}, {}, created=True, when=WHEN.replace(tzinfo=None))

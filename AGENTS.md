@@ -86,7 +86,9 @@ and the specs-as-intent carry over as-is.
   events containing another author still need their property rules evaluated.
 * `rules.evaluate_transition` is the pure Soma policy evaluator. Column
   names, status values, defaults, excluded tags, timezone and optional day
-  boundary come from runtime policy. It uses event time, preserves supplied
+  boundary come from runtime policy. Creation-outcome conditions accept exact
+  scalar values or arrays of accepted values; all columns must match. It uses
+  event time, preserves supplied
   values and explicit date edits, and never applies creation defaults to a
   historical seed or an unrelated edit. The Notion evaluator remains separate.
 * `soma_dispatch.py` owns the optional recurring task adapter, selected by
