@@ -161,14 +161,17 @@ unconditional write.
 
 `SOMA_TASKS_CONFIG` independently selects the Soma task adapter. It contains
 `table`, `time_zone`, semantic-to-catalog `columns` (title, status, due, completed,
-tags, priority, notes, links, blocked_by, and optional lane), creation `defaults`,
+tags, priority, notes, links, blocked_by, and optional lane/dispatch), creation `defaults`,
 optional `day_start_minutes` (0 through 1439, default 0) and optional `adoptions`.
 Due and completed values may be dates, UTC instants or floating local times
 (`YYYY-MM-DDTHH:MM`); a timed value counts on its logical day, the date of that
 local time minus `day_start_minutes`. Recurring tasks are always created date-only.
 Each recurring template has a stable `key` separate from its title, and may name a
 `lane` (who does the task); a template with a lane needs the lane column binding
-and fails closed without it.
+and fails closed without it. If the binding also maps `dispatch`, new AI-lane
+tasks carry `Requested` for the independent Agent Dispatch consumer. Other lanes
+keep their configured defaults. Retries retain the original occurrence and never
+reset an existing task's dispatch state.
 An adoption names `spec_key`, `occurrence` (date label), `template_key` and
 `target_id`. Accepted mappings are retained in the journal even when no new task
 is due. Removing configuration cannot erase or rebind them; a missing adopted

@@ -465,3 +465,23 @@ def test_template_lane_without_a_lane_binding_fails_closed():
     with pytest.raises(ValueError, match="lane"):
         run(hub, state, lane_spec())
     assert hub.inserts == []
+
+
+@pytest.mark.parametrize("lane,expected", [("AI", "Requested"), ("Me", None), ("", None)])
+def test_dispatch_binding_requests_only_new_ai_tasks_once(lane, expected):
+    hub, state = Hub(), {}
+    config = {**CONFIG, "columns": {**CONFIG["columns"], "lane": "who", "dispatch": "delivery"}}
+    recurring = replace(lane_spec(), templates=(replace(lane_spec().templates[0], lane=lane),))
+    run(hub, state, recurring, config)
+    (row,) = hub.rows.values()
+    assert row.get("delivery") == expected
+    row["delivery"] = "Started"
+    run(hub, state, recurring, config)
+    assert row["delivery"] == "Started"
+    assert len(hub.inserts) == 1
+
+
+def test_ai_task_without_dispatch_binding_stays_manual():
+    hub, state = Hub(), {}
+    run(hub, state, lane_spec(), {**CONFIG, "columns": {**CONFIG["columns"], "lane": "who"}})
+    assert "dispatch" not in next(iter(hub.rows.values()))

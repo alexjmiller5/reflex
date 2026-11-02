@@ -38,6 +38,9 @@ and the specs-as-intent carry over as-is.
   (`<people-id>:brainstorm` / `<people-id>:buy`); their lanes and instructions
   live in the spec, with `{name}` and `{person_id}` resolved at dispatch.
   Card reminder lanes come from runtime `keepalive_defaults.lane`.
+  Mapping the optional task `dispatch` column requests the separate Agent
+  Dispatch consumer for new AI-lane tasks. Existing/adopted tasks and retained
+  occurrence plans are never rewritten to dispatch them.
   `registry.py` ships only the Notion data-source ids, the
   dataclasses, and the row loaders. Personal spec content (chores, finances,
   people) must NEVER be committed to this repo - that's why it moved out.
