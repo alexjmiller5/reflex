@@ -6,6 +6,7 @@ Opens the hub's wake socket for the subscription consumer.
 """
 
 from datetime import datetime, timezone
+import time
 
 import httpx
 from urllib.parse import quote
@@ -37,7 +38,16 @@ class HubClient:
         return self._request("POST", path, json=body)
 
     def _get(self, path):
-        return self._request("GET", path)
+        for attempt in range(3):
+            try:
+                return self._request("GET", path)
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status not in {500, 502, 503, 504} or attempt == 2:
+                    raise
+                delay = 2**attempt
+                print(f"hub GET {path}: HTTP {status}; retry in {delay}s")
+                time.sleep(delay)
 
     def changes_socket(self):
         """The hub's wake socket: one `{seq, tables}` text message per burst of

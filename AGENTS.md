@@ -128,8 +128,10 @@ and the specs-as-intent carry over as-is.
   never falling back to an unconditional push. Dry-run inserts and patches
   return no committed receipt. The optional Soma consumer is
   selected by runtime policy; transport availability does not switch authority.
-  Hub HTTP connections use HTTPX's two connection retries. Response timeouts
-  and HTTP errors still propagate, so uncertain writes use journal recovery.
+  Hub HTTP connections use HTTPX's two connection retries. GET responses with
+  HTTP 500/502/503/504 retry twice after 1 and 2 seconds; exhaustion still fails
+  the tick. Response timeouts and write HTTP errors propagate, so uncertain
+  writes use journal recovery.
 
 ## Stack
 

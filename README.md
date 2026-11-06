@@ -83,6 +83,9 @@ backfill tasks.
 The scheduled `daily` function is a serialized ten-minute tick. Recurring dispatch
 and the remaining Notion compliance sweep still become due at 11:30 UTC and run
 once per due day. Failed ticks do not advance the durable success marker. A
+hub GET that receives HTTP 500/502/503/504 retries twice after 1 and 2 seconds;
+exhaustion still fails the tick. Writes use journal recovery instead of HTTP
+response retries, since their outcome may already be committed. A
 burst of event work that a drain cannot finish is retained, not a failure: daily
 work waits for a settled drain and the wake listener keeps draining. The tick
 fails, and Modal alerts, only once event work has stayed pending for 30 minutes. The

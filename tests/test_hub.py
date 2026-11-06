@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import httpcore
@@ -383,3 +383,102 @@ def test_patch_rejects_missing_or_wrong_commit_identity(hub, receipt):
         hub(lambda _: httpx.Response(200, json=receipt)).patch_row(
             "records", "a", {"label": "value"}, {"updated_at": "v", "hub_at": None}
         )
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+@pytest.mark.parametrize("recover", [True, False])
+def test_subscription_server_errors_retry_with_a_bound(hub, monkeypatch, status, recover):
+    from core.soma_events import SomaEventConsumer, seed_projection
+
+    calls, delays = [], []
+    monkeypatch.setattr("time.sleep", delays.append)
+    policy = {
+        "subscription_id": "sub",
+        "tables": {"records": {"creation_defaults": {"priority": "High"}}},
+    }
+    state = {}
+    seed_projection(state, policy, {"records": []}, through_seq=0)
+
+    def handler(request):
+        calls.append(request.url.path)
+        if request.url.path == "/v1/session":
+            return httpx.Response(
+                200,
+                json={
+                    "capabilities": {
+                        "conditional_patch": "revision-v1",
+                        "subscriptions": "durable-pull-v1",
+                        "subscription_features": "scalar-lifecycle-v1",
+                    }
+                },
+            )
+        assert request.url.path == "/v1/subscriptions/sub"
+        if not recover or calls.count("/v1/subscriptions/sub") < 3:
+            return httpx.Response(status, json={"error": "temporary failure"})
+        return httpx.Response(
+            200,
+            json={
+                "id": "sub",
+                "protocol": "durable-pull-v1",
+                "state": "active",
+                "last_seq": "0",
+                "acked_seq": "0",
+                "sources": [{"table": "records", "columns": ["priority"], "lifecycle": True}],
+            },
+        )
+
+    client = hub(handler)
+    now = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
+    consumer = SomaEventConsumer(client, state, policy, now=lambda: now)
+    daily_calls = []
+
+    def tick():
+        return run_tick(
+            state,
+            now,
+            lambda: daily_calls.append(True),
+            consume=lambda: consumer.drain(now + timedelta(seconds=40))["incomplete"],
+        )
+
+    if recover:
+        assert tick() == {"daily": True}
+        assert state["daily_success"] == "2026-01-02"
+        assert daily_calls == [True]
+    else:
+        with pytest.raises(httpx.HTTPStatusError) as error:
+            tick()
+        assert error.value.response.status_code == status
+        assert "daily_success" not in state
+        assert daily_calls == []
+    assert calls == ["/v1/session"] + ["/v1/subscriptions/sub"] * 3
+    assert delays == [1, 2]
+    assert client.requests == 4
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 429, 501])
+def test_subscription_permanent_errors_are_not_retried(hub, status):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(status, json={"error": "refused"})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        hub(handler).subscription_status("sub")
+    assert calls == ["/v1/subscriptions/sub"]
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+@pytest.mark.parametrize("operation", ["acknowledge", "insert_rows", "push_rows"])
+def test_server_error_never_replays_a_write(hub, status, operation):
+    calls = []
+
+    def handler(request):
+        calls.append(request.method)
+        return httpx.Response(status, json={"error": "outcome unknown"})
+
+    client = hub(handler)
+    args = ("sub", "delivery") if operation == "acknowledge" else ("records", [{"id": "a"}])
+    with pytest.raises(httpx.HTTPStatusError):
+        getattr(client, operation)(*args)
+    assert calls == ["POST"]
