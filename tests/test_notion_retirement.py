@@ -1,6 +1,7 @@
 """Soma-only deployments cannot accidentally revive retired Notion traffic."""
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -40,6 +41,7 @@ def test_missing_credential_rejects_still_selected_notion_backends(changes):
 
 
 def test_disabled_webhook_never_parses_payload_or_calls_notion(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     import app
     import core.config
     import core.notion
