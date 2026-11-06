@@ -149,7 +149,7 @@ def _daily(s, journal, now):
     from core.registry import CARD_COLUMNS, SPEC_COLUMNS, load_cards, load_recurring
     from core.table_mirror import TableMirror
 
-    notion = NotionClient(s.notion_api_token, dry_run=s.dry_run)
+    notion = NotionClient(s.notion_api_token, dry_run=s.dry_run) if s.notion_api_token else None
     today = now.astimezone(ZoneInfo("America/New_York")).date()
 
     hub = HubClient(s.soma_hub_url, s.soma_hub_token, dry_run=s.dry_run)
@@ -233,9 +233,11 @@ async def notion_webhook(request: Request):
     from core.handlers import handle_event, handshake_token, verify_signature
     from core.notion import NotionClient
 
+    s = Settings()
+    if not s.notion_api_token:
+        return {"ok": True, "ignored": "notion_disabled"}
     body = await request.body()
     payload = json.loads(body)
-    s = Settings()
     token = handshake_token(payload, s.notion_webhook_secret)
     if token:  # one-time subscription handshake: surface it in logs
         print(f"NOTION VERIFICATION TOKEN: {token}")

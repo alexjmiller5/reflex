@@ -140,6 +140,10 @@ uv · pydantic-settings (env config) · httpx (Notion API, hub) · websockets
 Config comes from env vars only: Modal Secret in the cloud, `op run` locally.
 `.env.tpl` is the canonical secrets manifest (op\:// refs, committed).
 Instantiate `Settings()` inside functions, never at import time.
+Notion credentials are optional only with a Soma task binding and every Notion
+event source explicitly retired. Selecting a Notion backend without its token
+fails before automation. Without the token, the Notion webhook acknowledges
+delivery without parsing the payload or constructing a Notion client.
 
 ## Commands
 

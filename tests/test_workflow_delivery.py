@@ -5,6 +5,7 @@ import runpy
 from pathlib import Path
 
 from core.config import Settings
+from core.handlers import EVENT_DBS
 
 
 def test_deployment_manifest_preserves_optional_workflow_settings(monkeypatch):
@@ -22,7 +23,7 @@ def test_deployment_manifest_preserves_optional_workflow_settings(monkeypatch):
         ),
         "SOMA_TASKS_CONFIG": json.dumps({"table": "work_items"}),
         "SOMA_SEASON_REMINDERS_CONFIG": "null",
-        "NOTION_RETIRED_SOURCES": "old-source",
+        "NOTION_RETIRED_SOURCES": ",".join(sorted(EVENT_DBS)),
     }
     # Simulate injection at the owning ENV boundary, then use the real deployed parser.
     rendered = []
@@ -33,8 +34,9 @@ def test_deployment_manifest_preserves_optional_workflow_settings(monkeypatch):
     env = runpy.run_path("scripts/sync_secrets.py")["parse_dotenv"]("\n".join(rendered))
     for key, value in env.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.delenv("NOTION_API_TOKEN", raising=False)
     settings = Settings(_env_file=None)
     assert settings.soma_tasks_config == {"table": "work_items"}
     assert settings.soma_event_policy["subscription_id"] == "fixture"
-    assert settings.retired_notion_sources == ("old-source",)
+    assert set(settings.retired_notion_sources) == EVENT_DBS
     assert settings.soma_season_reminders_config is None

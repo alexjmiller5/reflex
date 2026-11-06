@@ -6,7 +6,7 @@ not at import time, so tests can run without secrets.
 
 from datetime import datetime, timezone
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from core.soma_events import _columns
@@ -14,7 +14,7 @@ from core.rules import evaluate_transition
 
 
 class Settings(BaseSettings):
-    notion_api_token: str
+    notion_api_token: str = ""
     notion_webhook_secret: str = ""  # empty until subscription created
     soma_hub_url: str  # soma hub serving the recurring_specs/cc_keepalive_cards tables
     soma_hub_token: str
@@ -24,6 +24,16 @@ class Settings(BaseSettings):
     soma_tasks_config: dict | None = None
     soma_season_reminders_config: dict | None = None
     notion_retired_sources: str = ""
+
+    @model_validator(mode="after")
+    def validate_selected_backends(self):
+        from core.handlers import EVENT_DBS
+
+        if not self.notion_api_token and (
+            self.soma_tasks_config is None or EVENT_DBS - set(self.retired_notion_sources)
+        ):
+            raise ValueError("Notion credentials are required for selected Notion backends")
+        return self
 
     @field_validator("soma_event_policy")
     @classmethod

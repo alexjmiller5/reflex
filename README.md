@@ -38,9 +38,7 @@ backfill tasks.
 
 1. `op-project-bootstrap .env.tpl --repo alexjmiller5/reflex` -
    creates the `Reflex` vault, the `Reflex ENV` item
-   (one field per `.env.tpl` line - `NOTION_API_TOKEN` prompted,
-   `NOTION_WEBHOOK_SECRET` left `CHANGEME` until the webhook step below fills
-   it in), AND the `Reflex CI Modal Token` deploy-token item (bootstrap
+   (one field per `.env.tpl` line), AND the `Reflex CI Modal Token` deploy-token item (bootstrap
    scans `.github/workflows/*.yml` for `op://` refs and mints a dedicated
    token pair via `scripts/provision.py` and Modal's browser approval flow;
    no plaintext credentials touch disk), plus the read-only
@@ -48,7 +46,9 @@ backfill tasks.
    `OP_SERVICE_ACCOUNT_TOKEN` GitHub secret.
    (Local `just dev` / `just run` need no `~/.modal.toml` either - the
    machine-wide `modal` wrapper injects the same 1P-held token.)
-2. Create the webhook subscription (Notion has no API for this - integration
+2. For a Notion-backed deployment only, supply `NOTION_API_TOKEN` and optional
+   `NOTION_WEBHOOK_SECRET` through the server's secret delivery, then create
+   the webhook subscription (Notion has no API for this - integration
    settings only):
    - Deploy first (push to `main`) so `notion_webhook`'s URL exists.
    - **Re-subscribing later** (new endpoint URL, new integration): clear
@@ -71,6 +71,12 @@ backfill tasks.
      shows the event handled (not a 401).
 
 ## Local runs
+
+The default deployment manifest selects Soma. A Soma task binding and explicit
+retirement of every Notion event source allow `NOTION_API_TOKEN` to be absent.
+Any still-selected Notion backend requires that credential before startup.
+Without it, the Notion webhook acknowledges delivery without parsing or acting
+on the payload. Retired source IDs remain runtime configuration.
 
 - `just run-local` - dry run: same dispatch logic with zero Modal involvement,
   `DRY_RUN=true` forced so nothing writes to Notion (`scripts/run_local.py`).
