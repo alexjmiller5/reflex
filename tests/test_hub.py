@@ -482,3 +482,25 @@ def test_server_error_never_replays_a_write(hub, status, operation):
     with pytest.raises(httpx.HTTPStatusError):
         getattr(client, operation)(*args)
     assert calls == ["POST"]
+
+
+@pytest.mark.parametrize("path", ["/v1/rows/pull", "/v1/cursor"])
+@pytest.mark.parametrize("recover", [True, False])
+def test_read_posts_retry_server_errors(hub, monkeypatch, path, recover):
+    delays, attempts = [], []
+    monkeypatch.setattr("time.sleep", delays.append)
+
+    def handler(request):
+        attempts.append(request)
+        if not recover or len(attempts) < 3:
+            return httpx.Response(500, json={"error": "overloaded"})
+        return httpx.Response(200, json={"rows": [], "next_cursor": None})
+
+    client = hub(handler)
+    if recover:
+        assert client._post(path, {"table": "records"})["rows"] == []
+    else:
+        with pytest.raises(httpx.HTTPStatusError):
+            client._post(path, {"table": "records"})
+    assert len(attempts) == 3
+    assert delays == [1, 2]

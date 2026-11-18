@@ -35,18 +35,23 @@ class HubClient:
         return resp.json()
 
     def _post(self, path, body):
+        if path in {"/v1/rows/pull", "/v1/cursor"}:
+            return self._read("POST", path, json=body)
         return self._request("POST", path, json=body)
 
     def _get(self, path):
+        return self._read("GET", path)
+
+    def _read(self, method, path, **kwargs):
         for attempt in range(3):
             try:
-                return self._request("GET", path)
+                return self._request(method, path, **kwargs)
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
                 if status not in {500, 502, 503, 504} or attempt == 2:
                     raise
                 delay = 2**attempt
-                print(f"hub GET {path}: HTTP {status}; retry in {delay}s")
+                print(f"hub {method} {path}: HTTP {status}; retry in {delay}s")
                 time.sleep(delay)
 
     def changes_socket(self):
